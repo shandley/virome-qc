@@ -118,3 +118,40 @@ Running record of real-data validation results. Each dataset tests different asp
 - Complexity filter calibration across different viral genome GC ranges
 - Insert size distributions from merged pairs
 - Singleton rate as an indicator of asymmetric read quality (R1 vs R2)
+
+---
+
+### 3. Buddle et al. 2024 -- ATCC virome mock, ingestion only (ERR13480651, ERR13480663)
+
+**Source**: Buddle S et al. "Evaluating metagenomics and targeted approaches for diagnosis and surveillance of viruses." Genome Medicine 2024. ENA: PRJEB74559.
+
+**What it tests**: NovaSeq 6000 and NextSeq 2000 detection, human marker k-mer screening, adapter auto-detection on clinical virome data, Q-score binning detection.
+
+**Ingestion results (50K read scan, no full QC run):**
+
+| Metric | WGS (ERR13480651) | RNA-Seq (ERR13480663) |
+|--------|-------------------|----------------------|
+| Platform | NovaSeq 6000 (A01897) | NextSeq 2000 (VH00529) |
+| Q-score binning | Yes (4 values) | Yes (4 values) |
+| Read length | 150bp | 150bp |
+| Mean quality | 35.9 | 33.1 |
+| GC content | 40.3% | 49.1% |
+| Adapter detected | TruSeq/NEBNext (65.9%) | TruSeq/NEBNext (27.3%) |
+| Human markers | 0.6% | 2.8% |
+| Bacterial markers | 0.0% | 0.0% |
+| PhiX markers | 0.0% | 0.0% |
+
+**Findings:**
+
+1. **Platform detection works for NovaSeq 6000 and NextSeq 2000.** Both correctly identified from instrument IDs (A01897, VH00529). Q-score binning detected with exactly 4 distinct values.
+
+2. **Extreme adapter contamination in WGS sample (65.9%).** The lowest viral concentration (60 copies/mL) with NEBNext Ultra II FS enzymatic fragmentation produces very short inserts. Most reads are adapter dimer read-through. This would be flagged and most adapter-only reads would be removed by QC.
+
+3. **Human marker detection is low (0.6-2.8%).** This is because:
+   - WGS sample: CpG methylation-based host depletion (NEBNext Microbiome DNA Enrichment Kit) removed most human DNA before sequencing. 0.6% is plausible post-depletion.
+   - RNA-seq sample: RiboErase depleted rRNA (our 18S/28S markers), and Alu/LINE elements have low transcription. 2.8% from residual rRNA and occasional Alu transcripts.
+   - Our markers are DNA-centric (Alu, LINE-1, rRNA). For RNA samples, we need mRNA-based markers (ACTB, GAPDH, ribosomal protein transcripts).
+
+4. **TruSeq and NEBNext are indistinguishable by sequence.** Both use the identical adapter core. Merged into a single "TruSeq/NEBNext" family for auto-detection. Functionally interchangeable for trimming.
+
+5. **Need to test on a sample WITHOUT host depletion** to validate human marker sensitivity. The Buddle WGS samples all use CpG depletion, so human DNA is intentionally removed before sequencing.

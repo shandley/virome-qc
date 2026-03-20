@@ -35,22 +35,13 @@ const ADAPTER_FAMILIES: &[AdapterFamily] = &[
         ],
     },
     AdapterFamily {
-        name: "TruSeq",
-        config_names: &["truseq", "truseq_universal"],
+        name: "TruSeq/NEBNext",
+        // TruSeq and NEBNext share identical adapter sequences
+        // Both config names included so either will match profile
+        config_names: &["truseq", "truseq_universal", "nebnext"],
         probes: &[
-            // TruSeq -- shared with NEBNext, distinguished by context
-            b"AGATCGGAAGAGCACACGTCTGAAC", // R1 (unique suffix vs NEBNext)
+            b"AGATCGGAAGAGCACACGTCTGAAC", // R1
             b"AGATCGGAAGAGCGTCGTGTAGGGA", // R2
-        ],
-    },
-    AdapterFamily {
-        name: "NEBNext",
-        config_names: &["nebnext"],
-        probes: &[
-            // NEBNext -- same core as TruSeq but we check longer probes
-            // In practice, TruSeq and NEBNext are interchangeable for trimming
-            b"AGATCGGAAGAGCACACGTCTGAAC",
-            b"AGATCGGAAGAGCGTCGTGTAGGGA",
         ],
     },
 ];
