@@ -1,0 +1,49 @@
+name: "Short Read - NEBNext"
+description: "Short-read (2x75) sequencing with NEBNext library prep. Suitable for NextSeq/HiSeq."
+platform: illumina
+
+modules:
+  adapter:
+    enabled: true
+    sequences: [nebnext, truseq_universal]
+    internal_scan: false  # reads too short for reliable internal adapter detection
+    random_primer_trim: 0
+    min_overlap: 8  # lower threshold for short reads
+    max_mismatch_rate: 0.1
+  quality:
+    enabled: true
+    window_size: 10  # smaller window for 75bp reads
+    min_quality: 15
+    min_mean_quality: 20.0
+    min_length: 40  # lower threshold for short reads
+  polyx:
+    enabled: true
+    platform_aware: true
+    min_length: 8  # more aggressive for short reads where poly-G is proportionally larger
+  complexity:
+    enabled: true
+    min_entropy: 0.5
+  contaminant:
+    enabled: false
+    screen_rrna: false
+    screen_phix: false
+    screen_vectors: false
+    screen_kitome: false
+    min_kmer_fraction: 0.4
+  host:
+    enabled: false
+    reference: human
+    eve_aware: false
+    rescue: false
+  dedup:
+    enabled: false
+    optical_distance: 2500
+    umi_aware: false
+  chimera:
+    enabled: false
+
+thresholds:
+  min_survival_rate: 0.50
+  max_host_fraction: 0.80
+  max_rrna_fraction: 0.15
+  max_duplicate_rate: 0.50
