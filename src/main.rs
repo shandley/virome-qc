@@ -133,6 +133,10 @@ fn main() -> Result<()> {
                             .unwrap_or_else(|| "?".into())
                     );
                 }
+                if let Some(ref adapter) = ingest.quick_scan.dominant_adapter {
+                    let rate = ingest.quick_scan.adapter_rates.get(adapter).copied().unwrap_or(0.0);
+                    eprintln!("Adapters:  {} detected ({:.1}%)", adapter, rate * 100.0);
+                }
                 for w in &ingest.warnings {
                     eprintln!("  Warning: {w}");
                 }

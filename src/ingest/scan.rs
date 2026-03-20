@@ -9,13 +9,49 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Number of reads to scan for quick characterization
-const SCAN_SIZE: usize = 10_000;
+const SCAN_SIZE: usize = 50_000;
 
-/// Adapter core sequences for quick contamination check (first 12bp of each)
-const ADAPTER_CORES: &[(&str, &[u8])] = &[
-    ("TruSeq", b"AGATCGGAAGAG"),
-    ("Nextera", b"CTGTCTCTTATACACATCT"),
-    ("NEBNext", b"AGATCGGAAGAG"),
+/// Adapter families with distinguishing sequences (forward + RC for read-through)
+/// Each family has a unique identifying sequence that doesn't overlap with others.
+struct AdapterFamily {
+    name: &'static str,
+    /// Config name to use in profile (matches load_adapter_set keys)
+    config_names: &'static [&'static str],
+    /// Sequences to scan for (forward orientation, first N bp used as probe)
+    probes: &'static [&'static [u8]],
+}
+
+const ADAPTER_FAMILIES: &[AdapterFamily] = &[
+    AdapterFamily {
+        name: "Nextera",
+        config_names: &["nextera"],
+        probes: &[
+            // Nextera transposase -- unique sequence not shared with TruSeq
+            b"TCGTCGGCAGCGTC",
+            b"GTCTCGTGGGCTCGG",
+            // RC forms (appear during read-through)
+            b"CTGTCTCTTATACACATCT",
+        ],
+    },
+    AdapterFamily {
+        name: "TruSeq",
+        config_names: &["truseq", "truseq_universal"],
+        probes: &[
+            // TruSeq -- shared with NEBNext, distinguished by context
+            b"AGATCGGAAGAGCACACGTCTGAAC", // R1 (unique suffix vs NEBNext)
+            b"AGATCGGAAGAGCGTCGTGTAGGGA", // R2
+        ],
+    },
+    AdapterFamily {
+        name: "NEBNext",
+        config_names: &["nebnext"],
+        probes: &[
+            // NEBNext -- same core as TruSeq but we check longer probes
+            // In practice, TruSeq and NEBNext are interchangeable for trimming
+            b"AGATCGGAAGAGCACACGTCTGAAC",
+            b"AGATCGGAAGAGCGTCGTGTAGGGA",
+        ],
+    },
 ];
 
 /// Result of ingestion analysis
@@ -63,10 +99,12 @@ pub struct QuickScanStats {
     pub mean_gc: f64,
     /// Fraction of bases that are N
     pub n_rate: f64,
-    /// Estimated adapter contamination rate by type
+    /// Adapter detection rates by family name
     pub adapter_rates: HashMap<String, f64>,
-    /// Most likely adapter type
+    /// Most likely adapter family (highest hit rate above threshold)
     pub dominant_adapter: Option<String>,
+    /// Config names to use for the detected adapter family
+    pub detected_adapter_configs: Vec<String>,
     /// N-rate at position 0 (NextSeq cluster init indicator)
     pub n_rate_pos0: f64,
     /// Whether Q-score binning is detected (e.g., NovaSeq 3-bin)
@@ -111,7 +149,11 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     let mut min_qual_byte = 255u8;
 
     // Adapter detection
+    // Per-adapter-family hit counts
     let mut adapter_hits: HashMap<String, usize> = HashMap::new();
+    for family in ADAPTER_FAMILIES {
+        adapter_hits.insert(family.name.to_string(), 0);
+    }
 
     // Position 0 N-count
     let mut pos0_total = 0usize;
@@ -168,18 +210,44 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
             }
         }
 
-        // Quick adapter scan (check last 20bp for adapter core)
+        // Adapter family detection: scan read for each family's probe sequences
+        // Check both 3' tail (read-through) and internal (chimeric)
         if len >= 20 {
-            let tail = &seq[len.saturating_sub(20)..];
-            for (name, core) in ADAPTER_CORES {
-                let check_len = core.len().min(tail.len());
-                let mismatches: usize = tail[..check_len]
-                    .iter()
-                    .zip(core[..check_len].iter())
-                    .filter(|(a, b)| !a.eq_ignore_ascii_case(b))
-                    .count();
-                if (mismatches as f64 / check_len as f64) < 0.15 {
-                    *adapter_hits.entry(name.to_string()).or_insert(0) += 1;
+            'family: for family in ADAPTER_FAMILIES {
+                for probe in family.probes {
+                    let probe_len = probe.len().min(15); // use first 15bp of probe
+                    let probe_slice = &probe[..probe_len];
+
+                    // Check 3' tail
+                    if len >= probe_len {
+                        let tail_start = len.saturating_sub(probe_len + 5);
+                        for window in seq[tail_start..].windows(probe_len) {
+                            let mm: usize = window
+                                .iter()
+                                .zip(probe_slice.iter())
+                                .filter(|(a, b)| !a.eq_ignore_ascii_case(b))
+                                .count();
+                            if mm <= 2 {
+                                *adapter_hits.get_mut(family.name).unwrap() += 1;
+                                continue 'family;
+                            }
+                        }
+                    }
+
+                    // Check substring anywhere (catches internal adapters too)
+                    if len >= probe_len + 10 {
+                        for window in seq[..len.saturating_sub(5)].windows(probe_len) {
+                            let mm: usize = window
+                                .iter()
+                                .zip(probe_slice.iter())
+                                .filter(|(a, b)| !a.eq_ignore_ascii_case(b))
+                                .count();
+                            if mm <= 1 {
+                                *adapter_hits.get_mut(family.name).unwrap() += 1;
+                                continue 'family;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -221,16 +289,29 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     let distinct_quality_values = quality_value_seen.iter().filter(|&&v| v).count();
     let quality_binned = distinct_quality_values <= 8; // NovaSeq uses 4 values (2,12,23,37)
 
-    // Adapter rates
+    // Adapter detection: determine dominant family and get config names
     let adapter_rates: HashMap<String, f64> = adapter_hits
         .iter()
+        .filter(|(_, &count)| count > 0)
         .map(|(name, &count)| (name.clone(), count as f64 / total_reads as f64))
         .collect();
+
     let dominant_adapter = adapter_rates
         .iter()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-        .filter(|(_, &rate)| rate > 0.005) // at least 0.5%
+        .filter(|(_, &rate)| rate > 0.001) // at least 0.1% to be confident
         .map(|(name, _)| name.clone());
+
+    // Map dominant adapter to config names for profile override
+    let detected_adapter_configs = dominant_adapter
+        .as_ref()
+        .and_then(|name| {
+            ADAPTER_FAMILIES
+                .iter()
+                .find(|f| f.name == name.as_str())
+                .map(|f| f.config_names.iter().map(|s| s.to_string()).collect())
+        })
+        .unwrap_or_default();
 
     // Estimate total reads from file size
     let estimated_read_count = estimate_read_count(r1_path, total_reads, total_bases);
@@ -248,6 +329,7 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         n_rate,
         adapter_rates,
         dominant_adapter,
+        detected_adapter_configs,
         n_rate_pos0,
         quality_binned,
         distinct_quality_values,

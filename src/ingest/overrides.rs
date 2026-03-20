@@ -50,6 +50,20 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
         }
     }
 
+    // Auto-detect adapter sequences from scan data.
+    // If ingestion found a dominant adapter family, override the profile's adapter config.
+    if !ingest.quick_scan.detected_adapter_configs.is_empty() {
+        let detected = &ingest.quick_scan.detected_adapter_configs;
+        // Only override if the detected adapters are different from profile
+        let profile_has_detected = detected.iter().any(|d| {
+            profile.modules.adapter.sequences.iter().any(|s| s == d)
+        });
+        if !profile_has_detected {
+            // Replace adapter sequences with detected set
+            profile.modules.adapter.sequences = detected.clone();
+        }
+    }
+
     // Data-driven complexity threshold from ingestion scan.
     // Use the 2nd percentile of observed complexity scores as the threshold:
     // this removes only the extreme low-complexity tail while preserving
@@ -112,6 +126,7 @@ mod tests {
                 n_rate_pos0: 0.01,
                 quality_binned: false,
                 distinct_quality_values: 30,
+                detected_adapter_configs: vec![],
                 complexity_p2: 0.45,
                 complexity_p5: 0.55,
                 complexity_median: 0.85,
