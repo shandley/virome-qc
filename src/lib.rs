@@ -12,6 +12,6 @@ pub mod report;
 
 pub use config::{Profile, ProfileConfig};
 pub use corpus::{CorpusConfig, CorpusGenerator, SampleComposition};
-pub use ingest::{IngestResult, ingest_fastq};
+pub use ingest::{IngestResult, apply_overrides, ingest_fastq};
 pub use pipeline::{Pipeline, PipelineResult};
 pub use report::Passport;

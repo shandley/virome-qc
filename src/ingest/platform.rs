@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Sequencing chemistry type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Chemistry {
     /// 4-color SBS (MiSeq, HiSeq 2000/2500) -- no poly-G artifacts
     FourColor,

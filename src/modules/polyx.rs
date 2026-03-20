@@ -83,12 +83,25 @@ impl QcModule for PolyXTrimmer {
     }
 
     fn report(&self) -> ModuleReport {
+        let poly_g = self.poly_g_trimmed.load(Ordering::Relaxed);
+        let poly_other = self.poly_other_trimmed.load(Ordering::Relaxed);
+        // On 2-color platforms (platform_aware=true), poly-G is likely artifactual.
+        // On 4-color platforms, all poly-X is likely genomic.
+        let poly_g_classification = if self.platform_aware {
+            "likely_artifact"
+        } else {
+            "likely_genomic"
+        };
+
         self.stats.to_report(
             self.name(),
             serde_json::json!({
-                "poly_g_trimmed": self.poly_g_trimmed.load(Ordering::Relaxed),
-                "poly_other_trimmed": self.poly_other_trimmed.load(Ordering::Relaxed),
+                "poly_g_trimmed": poly_g,
+                "poly_g_classification": poly_g_classification,
+                "poly_other_trimmed": poly_other,
+                "poly_other_classification": "likely_genomic",
                 "total_polyx_bases": self.total_polyx_bases.load(Ordering::Relaxed),
+                "platform_aware": self.platform_aware,
             }),
         )
     }

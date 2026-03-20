@@ -299,12 +299,18 @@ impl ReadAnalytics {
         self.quality_before.record(quality);
         self.bases_before.record(sequence);
 
-        // Add to HyperLogLog for duplication estimate (one hash per read, not per k-mer)
-        // Hash the first 50bp as a read-level fingerprint
-        let prefix_len = sequence.len().min(50);
-        let read_hash = hash_read_prefix(&sequence[..prefix_len]);
-        let mut hll = self.hll.lock().unwrap();
-        hll.add_hash(read_hash);
+        // Add to HyperLogLog for duplication estimate.
+        // Sample every 8th read to reduce mutex contention -- HLL estimation
+        // is accurate with subsampling since it's a probabilistic sketch.
+        let count = self.reads_input.load(Ordering::Relaxed);
+        if count % 8 == 0 {
+            let prefix_len = sequence.len().min(50);
+            let read_hash = hash_read_prefix(&sequence[..prefix_len]);
+            if let Ok(mut hll) = self.hll.try_lock() {
+                hll.add_hash(read_hash);
+            }
+            // If lock is contended, skip -- HLL tolerates missing samples
+        }
     }
 
     /// Record a read that passed QC

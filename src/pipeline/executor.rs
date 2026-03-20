@@ -216,7 +216,7 @@ impl Pipeline {
                 block.clear();
 
                 blocks_processed += 1;
-                if blocks_processed % 10 == 0 {
+                if blocks_processed % 100 == 0 {
                     eprint!("\r  {}", qa.progress_line());
                 }
             }
@@ -404,7 +404,7 @@ impl Pipeline {
                 block.clear();
 
                 blocks_processed += 1;
-                if blocks_processed % 10 == 0 {
+                if blocks_processed % 100 == 0 {
                     eprint!("\r  {}", qa.progress_line());
                 }
             }

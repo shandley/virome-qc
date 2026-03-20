@@ -115,10 +115,9 @@ fn main() -> Result<()> {
             merge,
             threads,
         } => {
-            let profile_config = virome_qc::Profile::load(&profile)?;
-            let pipeline = virome_qc::Pipeline::new(profile_config, threads);
+            let mut profile_config = virome_qc::Profile::load(&profile)?;
 
-            // Run ingestion scan on the primary input file
+            // Run ingestion scan and apply platform-aware overrides
             let primary_input = r1.as_ref().unwrap_or(&input);
             if let Ok(ingest) = virome_qc::ingest_fastq(primary_input, r2.as_deref()) {
                 if let Some(ref plat) = ingest.platform {
@@ -137,7 +136,11 @@ fn main() -> Result<()> {
                 for w in &ingest.warnings {
                     eprintln!("  Warning: {w}");
                 }
+                // Apply platform-detected overrides to profile
+                profile_config = virome_qc::apply_overrides(profile_config, &ingest);
             }
+
+            let pipeline = virome_qc::Pipeline::new(profile_config, threads);
 
             let result = match (r1, r2) {
                 (Some(r1_path), Some(r2_path)) => {
@@ -209,8 +212,8 @@ fn main() -> Result<()> {
 
             let mut generator = virome_qc::CorpusGenerator::new(config);
             let summary = if paired {
-                let r1_path = output.with_extension("R1.fastq");
-                let r2_path = output.with_extension("R2.fastq");
+                let r1_path = output.with_extension("R1.fastq.gz");
+                let r2_path = output.with_extension("R2.fastq.gz");
                 println!(
                     "Generating {} paired-end reads ({sample_type} profile)...",
                     num_reads
@@ -263,6 +266,8 @@ fn main() -> Result<()> {
                 println!("N-rate pos 0: {:.2}%", qs.n_rate_pos0 * 100.0);
                 println!("Q-binned:     {}{}", qs.quality_binned,
                     if qs.quality_binned { format!(" ({} distinct values)", qs.distinct_quality_values) } else { String::new() });
+                println!("Complexity:   median={:.3} p2={:.3} p5={:.3}",
+                    qs.complexity_median, qs.complexity_p2, qs.complexity_p5);
                 if let Some(ref adapter) = qs.dominant_adapter {
                     let rate = qs.adapter_rates.get(adapter).copied().unwrap_or(0.0);
                     println!("Adapters:     {adapter} ({:.1}%)", rate * 100.0);

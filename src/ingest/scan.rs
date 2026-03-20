@@ -2,7 +2,7 @@
 
 use crate::ingest::platform::PlatformInfo;
 use anyhow::Result;
-use biometal::operations::{gc_content, mean_quality};
+use biometal::operations::{complexity_score, gc_content, mean_quality};
 use biometal::FastqStream;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -73,6 +73,12 @@ pub struct QuickScanStats {
     pub quality_binned: bool,
     /// Number of distinct quality values observed
     pub distinct_quality_values: usize,
+    /// Complexity score distribution: 2nd percentile (data-driven threshold)
+    pub complexity_p2: f64,
+    /// Complexity score distribution: 5th percentile
+    pub complexity_p5: f64,
+    /// Complexity score distribution: median
+    pub complexity_median: f64,
 }
 
 /// A recommendation for QC configuration
@@ -114,6 +120,9 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     // Quality value tracking (for binning detection)
     let mut quality_value_seen = [false; 94]; // Q0-Q93
 
+    // Complexity score collection
+    let mut complexity_scores: Vec<f64> = Vec::with_capacity(SCAN_SIZE);
+
     for record in stream {
         let record = record?;
 
@@ -142,6 +151,9 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
 
         // GC content
         total_gc += gc_content(seq);
+
+        // Complexity score
+        complexity_scores.push(complexity_score(seq));
 
         // N bases
         let n_count = seq.iter().filter(|&&b| b == b'N' || b == b'n').count();
@@ -223,6 +235,12 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     // Estimate total reads from file size
     let estimated_read_count = estimate_read_count(r1_path, total_reads, total_bases);
 
+    // Compute complexity percentiles for data-driven threshold setting
+    complexity_scores.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    let complexity_p2 = percentile_sorted(&complexity_scores, 0.02);
+    let complexity_p5 = percentile_sorted(&complexity_scores, 0.05);
+    let complexity_median = percentile_sorted(&complexity_scores, 0.50);
+
     let quick_scan = QuickScanStats {
         reads_scanned: total_reads,
         mean_quality: mean_qual,
@@ -233,6 +251,9 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         n_rate_pos0,
         quality_binned,
         distinct_quality_values,
+        complexity_p2,
+        complexity_p5,
+        complexity_median,
     };
 
     let reads = ReadInfo {
@@ -352,6 +373,15 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         recommendations,
         warnings,
     })
+}
+
+/// Get a percentile value from a sorted slice
+fn percentile_sorted(sorted: &[f64], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let idx = ((sorted.len() as f64 * p) as usize).min(sorted.len() - 1);
+    sorted[idx]
 }
 
 /// Estimate total read count from file size

@@ -7,8 +7,10 @@
 //! - Quick-scan statistics (GC, N-rate, adapter contamination, duplication)
 //! - Platform-specific recommendations (poly-G, optical dup distance, Q-binning)
 
+mod overrides;
 mod platform;
 mod scan;
 
+pub use overrides::apply_overrides;
 pub use platform::PlatformInfo;
 pub use scan::{IngestResult, QuickScanStats, ReadInfo, Recommendation, ingest_fastq};
