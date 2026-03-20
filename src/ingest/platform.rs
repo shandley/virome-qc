@@ -91,6 +91,58 @@ impl PlatformInfo {
             }
         }
 
+        // Check for SRA-reformatted headers: @SRR12345678.1 1 length=150
+        if primary.starts_with("SRR") || primary.starts_with("ERR") || primary.starts_with("DRR") {
+            // SRA accession -- no platform info recoverable from header
+            return Some(PlatformInfo {
+                instrument_id: primary.split('.').next().unwrap_or(primary).to_string(),
+                model: "Unknown (SRA-reformatted header, use --origfmt with fasterq-dump)".into(),
+                chemistry: Chemistry::Unknown,
+                patterned_flowcell: false,
+                quality_bins: None,
+                flowcell_id: None,
+            });
+        }
+
+        // Check for BGI/MGI DNBseq headers: @V350012345L1C001R00100000001/1
+        if primary.starts_with('V') || primary.starts_with("CL") {
+            let (model, chemistry, patterned, q_bins) = detect_bgi_model(primary);
+            if chemistry != Chemistry::Unknown {
+                return Some(PlatformInfo {
+                    instrument_id: primary.split('/').next().unwrap_or(primary).to_string(),
+                    model,
+                    chemistry,
+                    patterned_flowcell: patterned,
+                    quality_bins: q_bins,
+                    flowcell_id: None,
+                });
+            }
+        }
+
+        // Check for PacBio: @m64011_190830_220126/1/ccs
+        if primary.starts_with('m') && primary.contains('_') && primary.contains("/ccs") {
+            return Some(PlatformInfo {
+                instrument_id: primary.split('_').next().unwrap_or(primary).to_string(),
+                model: "PacBio".into(),
+                chemistry: Chemistry::Unknown,
+                patterned_flowcell: false,
+                quality_bins: None,
+                flowcell_id: None,
+            });
+        }
+
+        // Check for ONT: header often has runid= in comment
+        if comment.contains("runid=") {
+            return Some(PlatformInfo {
+                instrument_id: primary.to_string(),
+                model: "Oxford Nanopore".into(),
+                chemistry: Chemistry::Unknown,
+                patterned_flowcell: false,
+                quality_bins: None,
+                flowcell_id: None,
+            });
+        }
+
         // Neither matched -- return with Unknown
         let flowcell_id = primary_fields.get(2).map(|s| s.to_string());
         Some(PlatformInfo {
@@ -215,6 +267,16 @@ fn detect_model(instrument_id: &str) -> (String, Chemistry, bool, Option<u8>) {
         );
     }
 
+    // Element Biosciences AVITI
+    if id_upper.starts_with("AVITI") {
+        return (
+            "Element AVITI".into(),
+            Chemistry::FourColor, // AVITI uses 4-color chemistry
+            false,
+            None,
+        );
+    }
+
     // Unknown
     (
         format!("Unknown ({})", instrument_id),
@@ -222,6 +284,23 @@ fn detect_model(instrument_id: &str) -> (String, Chemistry, bool, Option<u8>) {
         false,
         None,
     )
+}
+
+/// Detect BGI/MGI sequencer from header prefix
+///
+/// BGI headers: @V350012345L1C001R00100000001/1
+/// V300 = MGISEQ-2000, V350 = DNBSEQ-T7, CL1 = DNBSEQ-G400
+fn detect_bgi_model(header: &str) -> (String, Chemistry, bool, Option<u8>) {
+    let upper = header.to_uppercase();
+    if upper.starts_with("V300") {
+        ("MGISEQ-2000".into(), Chemistry::FourColor, true, None)
+    } else if upper.starts_with("V350") {
+        ("DNBSEQ-T7".into(), Chemistry::FourColor, true, None)
+    } else if upper.starts_with("CL") {
+        ("DNBSEQ-G400".into(), Chemistry::FourColor, true, None)
+    } else {
+        ("Unknown BGI".into(), Chemistry::Unknown, false, None)
+    }
 }
 
 #[cfg(test)]
@@ -314,11 +393,55 @@ mod tests {
     }
 
     #[test]
+    fn test_sra_reformatted() {
+        let header = "@SRR12345678.1 1 length=150";
+        let info = PlatformInfo::from_header(header).unwrap();
+        assert!(info.model.contains("SRA"));
+        assert_eq!(info.instrument_id, "SRR12345678");
+        assert_eq!(info.chemistry, Chemistry::Unknown);
+    }
+
+    #[test]
+    fn test_bgi_dnbseq_t7() {
+        let header = "@V350012345L1C001R00100000001/1";
+        let info = PlatformInfo::from_header(header).unwrap();
+        assert_eq!(info.model, "DNBSEQ-T7");
+        assert_eq!(info.chemistry, Chemistry::FourColor);
+    }
+
+    #[test]
+    fn test_bgi_dnbseq_g400() {
+        let header = "@CL100012345L1C001R001_00001/1";
+        let info = PlatformInfo::from_header(header).unwrap();
+        assert_eq!(info.model, "DNBSEQ-G400");
+    }
+
+    #[test]
+    fn test_pacbio_hifi() {
+        let header = "@m64011_190830_220126/1/ccs";
+        let info = PlatformInfo::from_header(header).unwrap();
+        assert_eq!(info.model, "PacBio");
+    }
+
+    #[test]
+    fn test_ont() {
+        let header = "@abc123-def456 runid=xyz sampleid=sample1";
+        let info = PlatformInfo::from_header(header).unwrap();
+        assert_eq!(info.model, "Oxford Nanopore");
+    }
+
+    #[test]
+    fn test_element_aviti() {
+        let header = "@AVITI:12345:FLOWCELL:1:1:10000:1000 1:N:0:ACGT";
+        let info = PlatformInfo::from_header(header).unwrap();
+        assert_eq!(info.model, "Element AVITI");
+        assert_eq!(info.chemistry, Chemistry::FourColor);
+    }
+
+    #[test]
     fn test_non_illumina_header() {
-        // ONT header -- too few colon-separated fields
         let header = "@read_1234";
         let info = PlatformInfo::from_header(header);
-        // Returns Some with Unknown model (not None) since we still parse what we can
         assert!(info.is_some());
         assert!(info.unwrap().model.starts_with("Unknown"));
     }
