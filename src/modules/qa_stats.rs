@@ -299,9 +299,12 @@ impl ReadAnalytics {
         self.quality_before.record(quality);
         self.bases_before.record(sequence);
 
-        // Add to HyperLogLog for duplication estimate
+        // Add to HyperLogLog for duplication estimate (one hash per read, not per k-mer)
+        // Hash the first 50bp as a read-level fingerprint
+        let prefix_len = sequence.len().min(50);
+        let read_hash = hash_read_prefix(&sequence[..prefix_len]);
         let mut hll = self.hll.lock().unwrap();
-        hll.add_sequence(sequence);
+        hll.add_hash(read_hash);
     }
 
     /// Record a read that passed QC
@@ -458,6 +461,17 @@ fn format_count(n: u64) -> String {
     } else {
         format!("{n}")
     }
+}
+
+/// Hash a read prefix into a single u64 for read-level deduplication estimation.
+/// Uses FNV-1a for speed and good distribution.
+fn hash_read_prefix(prefix: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &b in prefix {
+        hash ^= b.to_ascii_uppercase() as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn percentile_from_bins(bins: &[u64], total: u64, percentile: f64) -> f64 {

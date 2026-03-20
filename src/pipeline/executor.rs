@@ -297,6 +297,16 @@ impl Pipeline {
         let mut w_sing = ctx.writer_singletons.lock().unwrap();
 
         for (ann_r1, ann_r2) in &results {
+            // Record adapter metrics for both mates regardless of pass/fail
+            for ann in [ann_r1, ann_r2] {
+                if let Some(ref adapter_name) = ann.metrics.adapter_detected {
+                    ctx.qa.record_adapter(adapter_name);
+                }
+                if ann.metrics.internal_adapter {
+                    ctx.qa.record_internal_adapter();
+                }
+            }
+
             let r1_pass = !ann_r1.is_failed();
             let r2_pass = !ann_r2.is_failed();
 
