@@ -1,0 +1,8 @@
+/target
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.sam
+.DS_Store

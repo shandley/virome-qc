@@ -1,0 +1,43 @@
+[package]
+name = "virome-qc"
+version = "0.1.0"
+edition = "2021"
+authors = ["Scott Handley <handley.scott@gmail.com>"]
+description = "High-performance, virome-specific QC platform for the Human Virome Program"
+license = "MIT OR Apache-2.0"
+rust-version = "1.75"
+
+[dependencies]
+# Core bioinformatics primitives
+biometal = { path = "/Users/scotthandley/Code/tools/biometal", default-features = false, features = [] }
+
+# Parallelism
+rayon = "1.8"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Configuration / serialization
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1"
+
+# Hashing for dedup
+rustc-hash = "2.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+tempfile = "3.8"
+proptest = "1.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

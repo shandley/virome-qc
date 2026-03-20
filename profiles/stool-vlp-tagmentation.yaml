@@ -1,0 +1,49 @@
+name: "Stool VLP - Tagmentation"
+description: "VLP-enriched stool virome with Nextera/tagmentation library prep"
+platform: illumina
+
+modules:
+  adapter:
+    enabled: true
+    sequences: [nextera, truseq_universal]
+    internal_scan: true
+    random_primer_trim: 0
+    min_overlap: 10
+    max_mismatch_rate: 0.1
+  quality:
+    enabled: true
+    window_size: 25
+    min_quality: 15
+    min_mean_quality: 20.0
+    min_length: 90
+  polyx:
+    enabled: true
+    platform_aware: true
+    min_length: 10
+  complexity:
+    enabled: true
+    min_entropy: 0.5
+  contaminant:
+    enabled: true
+    screen_rrna: true
+    screen_phix: true
+    screen_vectors: true
+    screen_kitome: false
+    min_kmer_fraction: 0.4
+  host:
+    enabled: true
+    reference: human
+    eve_aware: true
+    rescue: true
+  dedup:
+    enabled: true
+    optical_distance: 2500
+    umi_aware: false
+  chimera:
+    enabled: false
+
+thresholds:
+  min_survival_rate: 0.30
+  max_host_fraction: 0.20
+  max_rrna_fraction: 0.05
+  max_duplicate_rate: 0.50
