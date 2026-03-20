@@ -139,7 +139,7 @@ fn main() -> Result<()> {
                 }
                 if let Some(ref comp) = ingest.composition {
                     eprintln!(
-                        "Composition: {:.0}% human, {:.0}% bacterial, {:.1}% PhiX, {:.0}% unclassified",
+                        "Composition: {:.1}% human, {:.2}% bacterial, {:.2}% PhiX, {:.1}% unclassified",
                         comp.human_fraction * 100.0,
                         comp.bacterial_fraction * 100.0,
                         comp.phix_fraction * 100.0,
@@ -291,10 +291,10 @@ fn main() -> Result<()> {
 
                 if let Some(ref comp) = result.composition {
                     println!("--- Sample Composition (marker k-mer estimate) ---");
-                    println!("  Human:        {:>5.1}%", comp.human_fraction * 100.0);
-                    println!("  Bacterial:    {:>5.1}%", comp.bacterial_fraction * 100.0);
-                    println!("  PhiX:         {:>5.1}%", comp.phix_fraction * 100.0);
-                    println!("  Unclassified: {:>5.1}%", comp.unclassified_fraction * 100.0);
+                    println!("  Human:        {:>6.2}%", comp.human_fraction * 100.0);
+                    println!("  Bacterial:    {:>6.2}%", comp.bacterial_fraction * 100.0);
+                    println!("  PhiX:         {:>6.2}%", comp.phix_fraction * 100.0);
+                    println!("  Unclassified: {:>6.2}%", comp.unclassified_fraction * 100.0);
                     println!();
                 }
 
