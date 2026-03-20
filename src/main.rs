@@ -74,6 +74,21 @@ enum Commands {
         seed: u64,
     },
 
+    /// Scan FASTQ files to detect platform, characteristics, and potential issues
+    Ingest {
+        /// Forward reads (or single-end file)
+        #[arg(short = '1', long)]
+        r1: PathBuf,
+
+        /// Reverse reads (paired-end)
+        #[arg(short = '2', long)]
+        r2: Option<PathBuf>,
+
+        /// Output results as JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Generate report from existing passport files
     Report {
         /// Input directory containing passport JSON files
@@ -103,14 +118,32 @@ fn main() -> Result<()> {
             let profile_config = virome_qc::Profile::load(&profile)?;
             let pipeline = virome_qc::Pipeline::new(profile_config, threads);
 
+            // Run ingestion scan on the primary input file
+            let primary_input = r1.as_ref().unwrap_or(&input);
+            if let Ok(ingest) = virome_qc::ingest_fastq(primary_input, r2.as_deref()) {
+                if let Some(ref plat) = ingest.platform {
+                    eprintln!(
+                        "Platform: {} | {}bp {} | ~{} reads",
+                        plat.model,
+                        ingest.reads.read_length,
+                        if ingest.reads.paired { "PE" } else { "SE" },
+                        ingest
+                            .reads
+                            .estimated_read_count
+                            .map(|n| format!("{:.1}M", n as f64 / 1e6))
+                            .unwrap_or_else(|| "?".into())
+                    );
+                }
+                for w in &ingest.warnings {
+                    eprintln!("  Warning: {w}");
+                }
+            }
+
             let result = match (r1, r2) {
                 (Some(r1_path), Some(r2_path)) => {
-                    // Paired-end mode
-                    println!("Running paired-end QC...");
                     pipeline.run_paired(&r1_path, &r2_path, &output, merge)?
                 }
                 _ => {
-                    // Single-end mode
                     let input_files = discover_fastq_files(&input)?;
                     pipeline.run(&input_files, &output)?
                 }
@@ -194,6 +227,65 @@ fn main() -> Result<()> {
                 s
             };
             summary.print_report();
+        }
+        Commands::Ingest { r1, r2, json } => {
+            let result = virome_qc::ingest_fastq(&r1, r2.as_deref())?;
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                // Human-readable output
+                if let Some(ref plat) = result.platform {
+                    println!("Platform:     {} ({})", plat.model, plat.instrument_id);
+                    println!("Chemistry:    {:?}", plat.chemistry);
+                    println!("Flowcell:     {}", plat.flowcell_id.as_deref().unwrap_or("--"));
+                    println!("Patterned:    {}", plat.patterned_flowcell);
+                } else {
+                    println!("Platform:     Unknown (non-Illumina or unrecognized header)");
+                }
+                println!();
+
+                let r = &result.reads;
+                println!("Read length:  {}bp{}", r.read_length,
+                    if r.variable_length { " (variable)" } else { "" });
+                println!("Layout:       {}", if r.paired { "paired-end" } else { "single-end" });
+                println!("Quality enc:  Phred+{}", r.quality_offset);
+                if let Some(est) = r.estimated_read_count {
+                    println!("Est. reads:   ~{:.1}M", est as f64 / 1_000_000.0);
+                }
+                println!();
+
+                let qs = &result.quick_scan;
+                println!("--- Quick Scan ({} reads) ---", qs.reads_scanned);
+                println!("Mean quality: {:.1}", qs.mean_quality);
+                println!("Mean GC:      {:.1}%", qs.mean_gc * 100.0);
+                println!("N-rate:       {:.3}%", qs.n_rate * 100.0);
+                println!("N-rate pos 0: {:.2}%", qs.n_rate_pos0 * 100.0);
+                println!("Q-binned:     {}{}", qs.quality_binned,
+                    if qs.quality_binned { format!(" ({} distinct values)", qs.distinct_quality_values) } else { String::new() });
+                if let Some(ref adapter) = qs.dominant_adapter {
+                    let rate = qs.adapter_rates.get(adapter).copied().unwrap_or(0.0);
+                    println!("Adapters:     {adapter} ({:.1}%)", rate * 100.0);
+                } else {
+                    println!("Adapters:     none detected in scan");
+                }
+                println!();
+
+                if !result.recommendations.is_empty() {
+                    println!("--- Recommendations ---");
+                    for rec in &result.recommendations {
+                        println!("  {} = {} ({})", rec.parameter, rec.value, rec.reason);
+                    }
+                    println!();
+                }
+
+                if !result.warnings.is_empty() {
+                    println!("--- Warnings ---");
+                    for w in &result.warnings {
+                        println!("  {w}");
+                    }
+                }
+            }
         }
         Commands::Report { input, output } => {
             eprintln!("Report generation not yet implemented");
