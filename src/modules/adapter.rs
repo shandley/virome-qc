@@ -43,9 +43,17 @@ impl AdapterTrimmer {
             .map(|name| load_adapter_set(name))
             .collect();
 
-        // Precompute hash set of adapter k-mers + 1-mismatch variants for O(1) lookup
+        // Precompute hash set of adapter k-mers for internal scan.
+        // Use only FORWARD adapter sequences (not RC) -- RC forms are shorter/less specific
+        // and cause high false positive rates against real genomic sequence.
+        // RC forms are included in adapter_sets for 3' overlap detection only.
         let internal_kmer_hashes = if config.internal_scan {
-            build_adapter_kmer_index(&adapter_sets, INTERNAL_KMER_SIZE)
+            let forward_only: Vec<AdapterSet> = config
+                .sequences
+                .iter()
+                .map(|name| load_adapter_set_forward_only(name))
+                .collect();
+            build_adapter_kmer_index(&forward_only, INTERNAL_KMER_SIZE)
         } else {
             FxHashSet::default()
         };
@@ -277,35 +285,80 @@ fn build_adapter_kmer_index(adapter_sets: &[AdapterSet], k: usize) -> FxHashSet<
     hashes
 }
 
-fn load_adapter_set(name: &str) -> AdapterSet {
+/// Load forward-only adapter sequences (no RC) for internal k-mer scanning
+fn load_adapter_set_forward_only(name: &str) -> AdapterSet {
     match name {
         "truseq" | "truseq_universal" => AdapterSet {
             name: "TruSeq".into(),
             sequences: vec![
-                // TruSeq Universal Adapter
                 b"AGATCGGAAGAGCACACGTCTGAACTCCAGTCA".to_vec(),
-                // TruSeq Adapter, Index
                 b"AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT".to_vec(),
             ],
         },
         "nextera" => AdapterSet {
             name: "Nextera".into(),
             sequences: vec![
-                // Nextera Transposase Adapter A
                 b"TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG".to_vec(),
-                // Nextera Transposase Adapter B
                 b"GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG".to_vec(),
             ],
         },
         "nebnext" => AdapterSet {
             name: "NEBNext".into(),
             sequences: vec![
+                b"AGATCGGAAGAGCACACGTCTGAACTCCAGTCA".to_vec(),
+                b"AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT".to_vec(),
+            ],
+        },
+        _ => AdapterSet {
+            name: name.into(),
+            sequences: vec![],
+        },
+    }
+}
+
+/// Build adapter set with both forward and reverse complement sequences.
+/// Read-through in paired-end sequencing produces the RC of the opposite adapter.
+fn build_with_rc(name: &str, sequences: Vec<Vec<u8>>) -> AdapterSet {
+    use biometal::operations::reverse_complement;
+    let mut all_seqs = sequences.clone();
+    for seq in &sequences {
+        all_seqs.push(reverse_complement(seq));
+    }
+    AdapterSet {
+        name: name.into(),
+        sequences: all_seqs,
+    }
+}
+
+fn load_adapter_set(name: &str) -> AdapterSet {
+    match name {
+        "truseq" | "truseq_universal" => build_with_rc(
+            "TruSeq",
+            vec![
+                // TruSeq Universal Adapter
+                b"AGATCGGAAGAGCACACGTCTGAACTCCAGTCA".to_vec(),
+                // TruSeq Adapter, Index
+                b"AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT".to_vec(),
+            ],
+        ),
+        "nextera" => build_with_rc(
+            "Nextera",
+            vec![
+                // Nextera Transposase Adapter A
+                b"TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG".to_vec(),
+                // Nextera Transposase Adapter B
+                b"GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG".to_vec(),
+            ],
+        ),
+        "nebnext" => build_with_rc(
+            "NEBNext",
+            vec![
                 // NEBNext Adapter
                 b"AGATCGGAAGAGCACACGTCTGAACTCCAGTCA".to_vec(),
                 // NEBNext Universal Adapter
                 b"AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT".to_vec(),
             ],
-        },
+        ),
         _ => {
             log::warn!("Unknown adapter set '{}', using empty set", name);
             AdapterSet {
