@@ -131,6 +131,7 @@ mod tests {
                 complexity_p5: 0.55,
                 complexity_median: 0.85,
             },
+            composition: None,
             recommendations: vec![],
             warnings: vec![],
         }

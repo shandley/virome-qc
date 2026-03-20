@@ -137,6 +137,15 @@ fn main() -> Result<()> {
                     let rate = ingest.quick_scan.adapter_rates.get(adapter).copied().unwrap_or(0.0);
                     eprintln!("Adapters:  {} detected ({:.1}%)", adapter, rate * 100.0);
                 }
+                if let Some(ref comp) = ingest.composition {
+                    eprintln!(
+                        "Composition: {:.0}% human, {:.0}% bacterial, {:.1}% PhiX, {:.0}% unclassified",
+                        comp.human_fraction * 100.0,
+                        comp.bacterial_fraction * 100.0,
+                        comp.phix_fraction * 100.0,
+                        comp.unclassified_fraction * 100.0,
+                    );
+                }
                 for w in &ingest.warnings {
                     eprintln!("  Warning: {w}");
                 }
@@ -279,6 +288,15 @@ fn main() -> Result<()> {
                     println!("Adapters:     none detected in scan");
                 }
                 println!();
+
+                if let Some(ref comp) = result.composition {
+                    println!("--- Sample Composition (marker k-mer estimate) ---");
+                    println!("  Human:        {:>5.1}%", comp.human_fraction * 100.0);
+                    println!("  Bacterial:    {:>5.1}%", comp.bacterial_fraction * 100.0);
+                    println!("  PhiX:         {:>5.1}%", comp.phix_fraction * 100.0);
+                    println!("  Unclassified: {:>5.1}%", comp.unclassified_fraction * 100.0);
+                    println!();
+                }
 
                 if !result.recommendations.is_empty() {
                     println!("--- Recommendations ---");
