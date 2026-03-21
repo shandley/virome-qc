@@ -151,11 +151,105 @@ After removing the 115 adapter-contaminated reads from biometal-only:
 
 ---
 
-**Next steps**:
-- Test on full human genome (not just chr22)
-- Test k-mer containment approach as a fast pre-filter
-- Design the dual-scoring (host vs viral) classification system
-- Add minimum aligned fraction threshold to biometal mapping wrapper
+## Reference genome decision
+
+**Choice: Unmasked T2T-CHM13**
+
+Using T2T over GRCh38 because it resolves all centromeric/pericentromeric regions where many HERVs and repeats reside. More complete reference = better host depletion sensitivity. The increased EVE content risk is handled by the three-way classification, not by using an incomplete reference.
+
+**Rejected: Masked reference approach (hecatomb-style)**
+
+Hecatomb shredded RefSeq viral genomes and masked host regions where they mapped. Problems:
+1. Viral database is incomplete -- unmasked novel EVEs still cause false removal
+2. Masking creates alignment gaps -- reads spanning mask boundaries get poor scores
+3. Static masking goes stale when RefSeq updates
+4. Over-masking risk -- conserved domains (polymerases, kinases) shared between human genes and viruses would mask real coding regions
+5. Conflates EVE regions (ancient integrations) with shared domains (convergent evolution)
+
+The three-way classification approach handles ambiguity in the output (better) rather than modifying the input (fragile).
+
+## Retrovirus handling: endogenous vs exogenous discrimination
+
+### The problem
+
+ERVs (~8% of human genome) are degraded viral fossils. Reads from ERV loci look viral but are host. However, some retroviruses (HHV-6, HTLV, HIV) can be actively infectious AND share sequence with endogenous elements. Binary classification fails here.
+
+### SNP-level discrimination
+
+**Endogenous reads** match the host reference perfectly at the ERV locus -- they ARE the reference at that position.
+
+**Exogenous/infectious retroviral reads** show systematic divergence:
+- Consistent SNPs across multiple reads (not random sequencing error)
+- SNPs that preserve open reading frames (functional constraint)
+- Divergence level >2-3% from the integrated copy (distinct lineage)
+- RT error signature patterns
+
+### Implementation plan (Phase 3b -- separate from host depletion)
+
+This is a region-level analysis, not a per-read filter:
+
+1. Collect all reads mapping to known EVE/HERV regions (from the "ambiguous" output)
+2. Pileup and variant calling per EVE locus (biometal has these primitives)
+3. Classify variant pattern:
+   - No variants vs reference = endogenous (host reads from ERV locus)
+   - Consistent SNPs preserving ORFs = possible exogenous retrovirus
+   - Mix of perfect-match and variant reads = both present (co-mapping)
+4. Report per-locus classification with evidence
+
+This is genuinely novel -- no existing virome pipeline does SNP-level endogenous vs exogenous retrovirus discrimination.
+
+**Separation rationale**: Keep the QC pipeline fast (per-read streaming). The retrovirus analysis runs optionally on the ambiguous reads as a post-hoc deep-dive.
+
+---
+
+## Phase 3 implementation plan
+
+### Module: Host depletion
+
+**Position in pipeline**: After contaminant screening (Module 6), before length filter (Module 7).
+
+### Approach
+
+1. Build FM-index from T2T-CHM13 reference (one-time, ~5GB index)
+2. Map each read using biometal's ParallelMapper
+3. Three-way classification:
+
+| Read maps to host? | Maps to EVE region? | Viral k-mer signal? | Classification |
+|---|---|---|---|
+| No | -- | -- | KEEP |
+| Yes, high MAPQ | No | -- | REMOVE (host) |
+| Yes, high MAPQ | Yes | No | REMOVE (endogenous EVE) |
+| Yes, high MAPQ | Yes | Yes | FLAG (ambiguous) |
+| Yes, low MAPQ | -- | -- | FLAG (ambiguous) |
+| Yes, any | -- | -- | Check aligned fraction >= 70% |
+
+4. Minimum aligned fraction threshold (70%) to prevent the adapter-contamination false positives found in Experiment 1b
+
+### Inputs required
+
+- **T2T-CHM13 reference**: Downloaded via `virome-qc db build` or user-provided
+- **EVE annotation BED file**: Coordinates of known EVE/HERV regions in T2T
+- **Viral k-mer index**: Already built for contaminant screening module (rRNA/PhiX), extend with RefSeq viral k-mers for dual-scoring
+
+### Outputs
+
+- `clean_*.fastq.gz` -- reads classified as NOT host
+- `ambiguous.fastq.gz` -- reads that map to host but with viral signal or low confidence
+- Passport: host fraction, ambiguous fraction, EVE region hit distribution
+
+### Performance targets
+
+- biometal mapping: ~60K reads/sec at 8 threads (validated on chr22)
+- FM-index memory: 5-7GB for full human genome
+- Index build time: ~3-5 minutes (one-time)
+
+### Next steps
+
+1. Test FM-index build on full T2T-CHM13 (memory and time validation)
+2. Build EVE annotation BED from gEVE or similar database
+3. Implement the host depletion module
+4. Validate on Buddle data (known high-host content)
+5. Test on Cook data (should remove near-zero reads -- no host)
 
 ---
 
