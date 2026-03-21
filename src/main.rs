@@ -159,6 +159,7 @@ fn main() -> Result<()> {
             // Write QA passport
             let passport = result.passport();
             passport.write_json(&output.join("passport.json"))?;
+            virome_qc::report::generate_html_report(&passport, &output.join("report.html"))?;
 
             println!(
                 "QC complete: {}/{} reads passed ({:.1}%)",
@@ -297,8 +298,15 @@ fn main() -> Result<()> {
             }
         }
         Commands::Report { input, output } => {
-            eprintln!("Report generation not yet implemented");
-            let _ = (input, output);
+            let passport_path = if input.is_dir() {
+                input.join("passport.json")
+            } else {
+                input.clone()
+            };
+            let contents = std::fs::read_to_string(&passport_path)?;
+            let passport: virome_qc::Passport = serde_json::from_str(&contents)?;
+            virome_qc::report::generate_html_report(&passport, &output)?;
+            println!("Report written to: {}", output.display());
         }
     }
 

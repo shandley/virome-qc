@@ -44,13 +44,13 @@ pub struct Passport {
     /// Overall survival rate
     pub survival_rate: f64,
     /// Pairs where both mates passed (paired-end only)
-    #[serde(skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub pairs_passed: u64,
     /// Singleton reads (mate failed QC, paired-end only)
-    #[serde(skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub singletons: u64,
     /// Pairs successfully merged (paired-end only)
-    #[serde(skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub pairs_merged: u64,
     /// Per-module reports
     pub modules: Vec<ModuleReport>,
