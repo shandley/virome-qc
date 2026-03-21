@@ -148,6 +148,30 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
   --font-sans: 'Montserrat', system-ui, sans-serif;
   --font-mono: 'Fira Code', ui-monospace, monospace;
 }}
+.dark {{
+  --bg: oklch(0.2155 0.0254 284.0647);
+  --fg: oklch(0.8787 0.0426 272.2767);
+  --card: oklch(0.2429 0.0304 283.9110);
+  --card-fg: oklch(0.8787 0.0426 272.2767);
+  --primary: oklch(0.7871 0.1187 304.7693);
+  --primary-fg: oklch(0.2429 0.0304 283.9110);
+  --secondary: oklch(0.4765 0.0340 278.6430);
+  --muted: oklch(0.2973 0.0294 276.2144);
+  --muted-fg: oklch(0.7510 0.0396 273.9320);
+  --accent: oklch(0.8467 0.0833 210.2545);
+  --accent-fg: oklch(0.2429 0.0304 283.9110);
+  --destructive: oklch(0.7556 0.1297 2.7642);
+  --border: oklch(0.3240 0.0319 281.9784);
+  --chart-1: oklch(0.7871 0.1187 304.7693);
+  --chart-2: oklch(0.8467 0.0833 210.2545);
+  --chart-3: oklch(0.8577 0.1092 142.7153);
+  --chart-4: oklch(0.8237 0.1015 52.6294);
+  --chart-5: oklch(0.9226 0.0238 30.4919);
+  --pass: oklch(0.8577 0.1092 142.7153);
+  --warn: oklch(0.8237 0.1015 52.6294);
+  --fail: oklch(0.7556 0.1297 2.7642);
+  --shadow: 0px 4px 6px 0px hsl(240 30% 10% / 0.3), 0px 1px 2px -1px hsl(240 30% 10% / 0.3);
+}}
 *, *::before, *::after {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ font-family: var(--font-sans); background: var(--bg); color: var(--fg); line-height: 1.6; font-size: 14px; }}
 .container {{ max-width: 1100px; margin: 0 auto; padding: 32px 24px; }}
@@ -198,6 +222,14 @@ svg {{ width: 100%; height: auto; }}
 .axis-label {{ font-size: 10px; fill: var(--muted-fg); font-family: var(--font-mono); }}
 .axis-line {{ stroke: var(--border); stroke-width: 0.5; }}
 
+/* Dark mode toggle */
+.theme-toggle {{ background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; font-family: var(--font-sans); font-size: 12px; font-weight: 500; color: var(--muted-fg); transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }}
+.theme-toggle:hover {{ background: var(--secondary); color: var(--fg); }}
+.theme-toggle svg {{ width: 14px; height: 14px; fill: currentColor; }}
+
+/* Smooth transition for theme switching */
+body, .card, table, .chart-panel, .alert {{ transition: background 0.2s, color 0.2s, border-color 0.2s; }}
+
 /* Footer */
 footer {{ margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted-fg); font-size: 12px; text-align: center; }}
 </style>
@@ -210,7 +242,14 @@ footer {{ margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--borde
     <h1>virome-qc</h1>
     <div class="header-meta">{profile} &middot; v{version}</div>
   </div>
-  <span class="badge {tier_class}">{tier}</span>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">
+      <svg id="icon-sun" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      <svg id="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      <span id="theme-label">Dark</span>
+    </button>
+    <span class="badge {tier_class}">{tier}</span>
+  </div>
 </div>
 
 <div class="grid">
@@ -391,6 +430,66 @@ if (qa.distributions) {{
   if (d.quality_scores) drawHist('chart-qscores', d.quality_scores.bin_edges, d.quality_scores.counts, C.chart2);
   if (d.trimmed_bases) drawHist('chart-trimmed', d.trimmed_bases.bin_edges, d.trimmed_bases.counts, C.chart4);
 }}
+
+// Theme toggle
+function toggleTheme() {{
+  document.documentElement.classList.toggle('dark');
+  const isDark = document.documentElement.classList.contains('dark');
+  localStorage.setItem('virome-qc-theme', isDark ? 'dark' : 'light');
+  updateThemeUI(isDark);
+  // Re-read CSS variables and redraw charts
+  reloadColors();
+  redrawAll();
+}}
+
+function updateThemeUI(isDark) {{
+  document.getElementById('icon-sun').style.display = isDark ? 'block' : 'none';
+  document.getElementById('icon-moon').style.display = isDark ? 'none' : 'block';
+  document.getElementById('theme-label').textContent = isDark ? 'Light' : 'Dark';
+}}
+
+function reloadColors() {{
+  const cs = getComputedStyle(document.documentElement);
+  C.chart1 = cs.getPropertyValue('--chart-1').trim();
+  C.chart2 = cs.getPropertyValue('--chart-2').trim();
+  C.chart3 = cs.getPropertyValue('--chart-3').trim();
+  C.chart4 = cs.getPropertyValue('--chart-4').trim();
+  C.chart5 = cs.getPropertyValue('--chart-5').trim();
+  C.border = cs.getPropertyValue('--border').trim();
+  C.muted = cs.getPropertyValue('--muted-fg').trim();
+  BASES.a = C.chart3; BASES.c = C.chart2; BASES.g = C.chart4; BASES.t = C.chart5; BASES.n = C.muted;
+}}
+
+function redrawAll() {{
+  for (const id of ['chart-quality-before','chart-quality-after','chart-bases-before','chart-bases-after','chart-length','chart-gc','chart-qscores','chart-trimmed']) {{
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  }}
+  if (qa.per_position) {{
+    drawQuality('chart-quality-before', (qa.per_position.quality_before||{{}}).positions);
+    drawQuality('chart-quality-after', (qa.per_position.quality_after||{{}}).positions);
+    drawBases('chart-bases-before', (qa.per_position.bases_before||{{}}).positions);
+    drawBases('chart-bases-after', (qa.per_position.bases_after||{{}}).positions);
+  }}
+  if (qa.distributions) {{
+    const d = qa.distributions;
+    if (d.length_before) drawHist('chart-length', d.length_before.bin_edges, d.length_before.counts, C.chart1);
+    if (d.gc_content) drawHist('chart-gc', d.gc_content.bin_edges, d.gc_content.counts, C.chart3);
+    if (d.quality_scores) drawHist('chart-qscores', d.quality_scores.bin_edges, d.quality_scores.counts, C.chart2);
+    if (d.trimmed_bases) drawHist('chart-trimmed', d.trimmed_bases.bin_edges, d.trimmed_bases.counts, C.chart4);
+  }}
+}}
+
+// Initialize theme from localStorage or system preference
+(function() {{
+  const saved = localStorage.getItem('virome-qc-theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = saved === 'dark' || (!saved && prefersDark);
+  if (isDark) document.documentElement.classList.add('dark');
+  updateThemeUI(isDark);
+  reloadColors();
+  redrawAll();
+}})();
 </script>
 </body>
 </html>"##,
