@@ -90,10 +90,42 @@ Config already supports human, mouse, rat, bat, etc. Host index needs to be orga
 3. For a dual-scoring approach (host score + viral score), the speed advantage of biometal is significant
 4. FM-index memory for full human genome: ~5-7GB with default sampling, ~2-3GB with memory_optimized
 
+### Detailed concordance analysis
+
+| Category | Count | Notes |
+|---|---|---|
+| Both mapped | 1,004 | Core agreement |
+| minimap2-only | 315 | biometal misses |
+| biometal-only | 178 | minimap2 misses |
+
+**minimap2-only reads (315) -- MAPQ distribution:**
+- MAPQ 0: 64 (20%) -- no confidence
+- MAPQ 1-9: 222 (70%) -- very low confidence
+- MAPQ 10-29: 27 (9%) -- moderate
+- MAPQ 30+: 2 (0.6%) -- only 2 high-confidence misses
+
+**90% of the "sensitivity gap" is MAPQ < 10 reads.** These are multimapping, repetitive, or marginal alignments that would be filtered by any MAPQ threshold.
+
+**biometal-only reads (178) -- MAPQ distribution:**
+- MAPQ 0: 44 (25%)
+- MAPQ 60: 134 (75%) -- high confidence
+
+**biometal finds 134 high-confidence mappings that minimap2 misses entirely.** This is unexpected and needs investigation -- could be due to different seeding strategies or alignment heuristics.
+
+**Concordance at MAPQ >= 10:**
+- Both agree: 1,004
+- minimap2-only: 29
+- biometal-only: 134
+- **At quality-filtered thresholds, biometal is actually MORE sensitive** (1,138 vs 1,033)
+
+**Key insight**: The raw mapping rate comparison (14.2% vs 11.8%) is misleading. The apparent sensitivity gap is dominated by low-confidence (MAPQ < 10) alignments that minimap2 reports but biometal doesn't. At meaningful quality thresholds (MAPQ >= 10), biometal maps more reads than minimap2.
+
+This is ideal for host depletion where we want confident classifications, not exhaustive low-quality mappings.
+
 **Next steps**:
+- Investigate the 134 biometal-only MAPQ 60 reads -- are these true host reads?
 - Test on full human genome (not just chr22)
-- Evaluate the sensitivity gap: are the 234 "missed" reads truly host, or ambiguous?
-- Test k-mer containment approach as an alternative (faster, less memory)
+- Test k-mer containment approach as a fast pre-filter
 - Design the dual-scoring (host vs viral) classification system
 
 ---
