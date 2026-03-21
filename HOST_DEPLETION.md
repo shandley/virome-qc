@@ -122,11 +122,40 @@ Config already supports human, mouse, rat, bat, etc. Host index needs to be orga
 
 This is ideal for host depletion where we want confident classifications, not exhaustive low-quality mappings.
 
+### Experiment 1b: Investigation of 134 biometal-only MAPQ 60 reads
+
+**Finding**: These are NOT true host reads. They are short-insert adapter-contaminated reads.
+
+- 115 of 178 (65%) contain TruSeq adapter sequence (`AGATCGGAAGAGCACACGTCTGAAC`)
+- The genomic portion is only 30-80bp, rest is adapter read-through
+- BLAST confirms: best alignments cover only 28-79bp of 150bp reads
+- Biometal seeds on the short genomic fragment and calls it MAPQ 60
+- Minimap2 default mode correctly rejects (insufficient aligned fraction)
+- With sensitive settings (`-k 13 -w 5`), minimap2 finds 198 partial alignments
+
+**Impact on pipeline design**: This is not a real problem because:
+1. Adapter trimming (Module 1) runs before host depletion
+2. After trimming, these reads become 30-80bp fragments
+3. Most will fail the length filter (Module 7)
+4. Those that survive are short genuine genomic fragments that should map correctly
+
+**Biometal limitation to note**: MAPQ calculation doesn't account for the fraction of the read that aligns. A 40bp alignment out of 150bp should not get MAPQ 60. This could be addressed by adding a minimum aligned fraction threshold to the host depletion module.
+
+### Revised concordance (excluding adapter-contaminated reads)
+
+After removing the 115 adapter-contaminated reads from biometal-only:
+- True biometal-only: ~63 reads (from 178 - 115)
+- Of these, many are likely short partial alignments similar to the adapter reads
+
+**At MAPQ >= 10, excluding adapter artifacts, both tools have comparable sensitivity for clean reads.** The pipeline ordering (adapter trim -> host mapping) naturally resolves the biometal false positive issue.
+
+---
+
 **Next steps**:
-- Investigate the 134 biometal-only MAPQ 60 reads -- are these true host reads?
 - Test on full human genome (not just chr22)
 - Test k-mer containment approach as a fast pre-filter
 - Design the dual-scoring (host vs viral) classification system
+- Add minimum aligned fraction threshold to biometal mapping wrapper
 
 ---
 
