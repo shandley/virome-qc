@@ -39,26 +39,29 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
         ));
     }
 
-    // Contaminant cards
+    // Contaminant cards with percentages
     let mut contaminant_cards = String::new();
+    let ri = passport.reads_input.max(1) as f64;
     for m in &passport.modules {
         if m.name == "contaminant" {
             if let Some(rrna) = m.extra.get("rrna_removed").and_then(|v| v.as_u64()) {
                 let prok = m.extra.get("rrna_prokaryotic").and_then(|v| v.as_u64()).unwrap_or(0);
                 let euk = m.extra.get("rrna_eukaryotic").and_then(|v| v.as_u64()).unwrap_or(0);
                 contaminant_cards.push_str(&format!(
-                    r#"<div class="card"><div class="card-value" style="color:var(--chart-1)">{}</div><div class="card-label">rRNA</div><div class="card-sub">{} prokaryotic / {} eukaryotic</div></div>"#,
-                    fmt(rrna), fmt(prok), fmt(euk)
+                    r#"<div class="card"><div class="card-value" style="color:var(--chart-1)">{:.2}%</div><div class="card-label">rRNA</div><div class="card-sub">{} reads ({} prok / {} euk)</div></div>"#,
+                    rrna as f64 / ri * 100.0, fmt(rrna), fmt(prok), fmt(euk)
                 ));
             }
             if let Some(phix) = m.extra.get("phix_removed").and_then(|v| v.as_u64()) {
                 contaminant_cards.push_str(&format!(
-                    r#"<div class="card"><div class="card-value" style="color:var(--chart-2)">{}</div><div class="card-label">PhiX</div></div>"#, fmt(phix)
+                    r#"<div class="card"><div class="card-value" style="color:var(--chart-2)">{:.3}%</div><div class="card-label">PhiX</div><div class="card-sub">{} reads</div></div>"#,
+                    phix as f64 / ri * 100.0, fmt(phix)
                 ));
             }
             if let Some(vec) = m.extra.get("vector_removed").and_then(|v| v.as_u64()) {
                 contaminant_cards.push_str(&format!(
-                    r#"<div class="card"><div class="card-value" style="color:var(--chart-4)">{}</div><div class="card-label">Vector</div></div>"#, fmt(vec)
+                    r#"<div class="card"><div class="card-value" style="color:var(--chart-4)">{:.3}%</div><div class="card-label">Vector</div><div class="card-sub">{} reads</div></div>"#,
+                    vec as f64 / ri * 100.0, fmt(vec)
                 ));
             }
         }
@@ -74,11 +77,21 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
     };
 
     let paired_html = if passport.pairs_passed > 0 {
+        let total_pairs = passport.pairs_passed + passport.singletons;
+        let tp = total_pairs.max(1) as f64;
+        let merge_pct = if passport.pairs_passed > 0 {
+            passport.pairs_merged as f64 / passport.pairs_passed as f64 * 100.0
+        } else { 0.0 };
         format!(
-            r#"<div class="card"><div class="card-value">{}</div><div class="card-label">Pairs</div><div class="card-sub">{} pairs</div></div>
-            <div class="card"><div class="card-value">{}</div><div class="card-label">Singletons</div></div>
-            <div class="card"><div class="card-value">{}</div><div class="card-label">Merged</div></div>"#,
-            fmt(passport.pairs_passed), passport.pairs_passed, fmt(passport.singletons), fmt(passport.pairs_merged),
+            r#"<div class="card"><div class="card-value">{}</div><div class="card-label">Pairs</div><div class="card-sub">{:.1}% of input pairs</div></div>
+            <div class="card"><div class="card-value">{}</div><div class="card-label">Singletons</div><div class="card-sub">{:.1}% orphaned</div></div>
+            <div class="card"><div class="card-value">{}</div><div class="card-label">Merged</div><div class="card-sub">{:.1}% of passing pairs</div></div>"#,
+            fmt(passport.pairs_passed),
+            passport.pairs_passed as f64 / tp * 100.0,
+            fmt(passport.singletons),
+            passport.singletons as f64 / ri * 100.0,
+            fmt(passport.pairs_merged),
+            merge_pct,
         )
     } else { String::new() };
 
@@ -204,7 +217,7 @@ footer {{ margin-top:48px; padding-top:16px; border-top:1px solid var(--border);
 <div class="grid">
   <div class="card"><div class="card-value">{reads_input}</div><div class="card-label">Input</div><div class="card-sub">{reads_input_exact} reads</div></div>
   <div class="card"><div class="card-value">{reads_passed}</div><div class="card-label">Passed</div><div class="card-sub">{reads_passed_exact} reads</div></div>
-  <div class="card"><div class="card-value" style="color:var(--{tier_class})">{survival_pct:.1}%</div><div class="card-label">Survival</div><div class="card-sub">{reads_removed} removed</div></div>
+  <div class="card"><div class="card-value" style="color:var(--{tier_class})">{survival_pct:.1}%</div><div class="card-label">Survival</div><div class="card-sub">{reads_removed} removed ({removal_pct:.1}%)</div></div>
   {dup_html}
   {paired_html}
 </div>
@@ -487,6 +500,7 @@ function toggleTheme() {{
         reads_passed = fmt(passport.reads_passed),
         reads_passed_exact = passport.reads_passed,
         reads_removed = fmt(passport.reads_input.saturating_sub(passport.reads_passed)),
+        removal_pct = 100.0 - survival_pct,
         survival_pct = survival_pct,
         dup_html = dup_html,
         paired_html = paired_html,
