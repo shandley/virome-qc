@@ -33,6 +33,11 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
         }
     }
 
+    // Q-score binning detection
+    if ingest.quick_scan.quality_binned {
+        profile.modules.quality.quality_binned = true;
+    }
+
     // Read length adjustments
     let read_length = ingest.reads.read_length;
     if read_length > 0 {

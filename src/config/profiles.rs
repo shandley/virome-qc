@@ -64,6 +64,11 @@ pub struct QualityConfig {
     pub min_mean_quality: f64,
     /// Minimum read length after trimming
     pub min_length: usize,
+    /// Quality scores are binned (NovaSeq/NextSeq). Auto-set by ingestion engine.
+    /// When true, uses bin-aware trimming (fraction of low-bin bases) instead of
+    /// mean quality in sliding window.
+    #[serde(default)]
+    pub quality_binned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,6 +262,7 @@ impl Profile {
                     min_quality: 15,
                     min_mean_quality: 20.0,
                     min_length: 90,
+                    quality_binned: false,
                 },
                 polyx: PolyXConfig {
                     enabled: true,
@@ -319,6 +325,7 @@ impl Profile {
                     min_quality: 15,
                     min_mean_quality: 20.0,
                     min_length: 90,
+                    quality_binned: false,
                 },
                 polyx: PolyXConfig {
                     enabled: true,
@@ -381,6 +388,7 @@ impl Profile {
                     min_quality: 15,
                     min_mean_quality: 20.0,
                     min_length: 90,
+                    quality_binned: false,
                 },
                 polyx: PolyXConfig {
                     enabled: true,
@@ -443,6 +451,7 @@ impl Profile {
                     min_quality: 15,
                     min_mean_quality: 20.0,
                     min_length: 90,
+                    quality_binned: false,
                 },
                 polyx: PolyXConfig {
                     enabled: true,
