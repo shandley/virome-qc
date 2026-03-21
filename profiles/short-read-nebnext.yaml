@@ -24,10 +24,10 @@ modules:
     enabled: true
     min_entropy: 0.5
   contaminant:
-    enabled: false
-    screen_rrna: false
-    screen_phix: false
-    screen_vectors: false
+    enabled: true
+    screen_rrna: true
+    screen_phix: true
+    screen_vectors: true
     screen_kitome: false
     min_kmer_fraction: 0.4
   host:

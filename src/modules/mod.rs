@@ -2,6 +2,8 @@
 
 mod adapter;
 mod complexity;
+mod contaminant;
+mod contaminant_refs;
 mod length;
 pub mod merge;
 mod nfilter;
@@ -11,6 +13,7 @@ mod quality;
 
 pub use adapter::AdapterTrimmer;
 pub use complexity::ComplexityFilter;
+pub use contaminant::ContaminantScreener;
 pub use length::LengthFilter;
 pub use merge::{MergeConfig, MergeResult, ReadMerger};
 pub use nfilter::NFilter;

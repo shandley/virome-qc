@@ -6,8 +6,9 @@
 
 use crate::config::{ProfileConfig, Thresholds};
 use crate::modules::{
-    AdapterTrimmer, AnalyticsSnapshot, ComplexityFilter, LengthFilter, MergeConfig, MergeResult,
-    ModuleReport, NFilter, PolyXTrimmer, QcModule, QualityTrimmer, ReadAnalytics, ReadMerger,
+    AdapterTrimmer, AnalyticsSnapshot, ComplexityFilter, ContaminantScreener, LengthFilter,
+    MergeConfig, MergeResult, ModuleReport, NFilter, PolyXTrimmer, QcModule, QualityTrimmer,
+    ReadAnalytics, ReadMerger,
 };
 use crate::pipeline::record::AnnotatedRecord;
 use crate::report::Passport;
@@ -488,10 +489,10 @@ impl Pipeline {
     /// 3. N-filter — remove reads with excessive ambiguous bases
     /// 4. Quality trim — trim low-quality tails and filter by mean quality
     /// 5. Complexity filter — assess cleaned sequence entropy
-    /// 6. Length filter — final catch for reads shortened by cumulative trimming
+    /// 6. Contaminant screening — rRNA, PhiX, vectors (k-mer index)
+    /// 7. Length filter — final catch for reads shortened by cumulative trimming
     ///
-    /// Future phases insert after complexity:
-    /// 7. Contaminant screening (Phase 2)
+    /// Future phases:
     /// 8. Host depletion (Phase 3)
     /// 9. Deduplication (Phase 4)
     fn build_modules(&self) -> Result<Vec<Box<dyn QcModule + Send + Sync>>> {
@@ -521,7 +522,12 @@ impl Pipeline {
             modules.push(Box::new(ComplexityFilter::new(&cfg.complexity)));
         }
 
-        // 6. Final length filter — catch reads shortened by cumulative trimming
+        // 6. Contaminant screening — rRNA, PhiX, vectors (Phase 2)
+        if cfg.contaminant.enabled {
+            modules.push(Box::new(ContaminantScreener::new(&cfg.contaminant)));
+        }
+
+        // 7. Final length filter — catch reads shortened by cumulative trimming
         if cfg.quality.enabled {
             modules.push(Box::new(LengthFilter::new(cfg.quality.min_length)));
         }
