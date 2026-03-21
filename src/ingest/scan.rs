@@ -1,6 +1,5 @@
 //! Quick-scan ingestion: read first N records to characterize the data
 
-use crate::ingest::markers::{CompositionEstimate, MarkerDb};
 use crate::ingest::platform::PlatformInfo;
 use anyhow::Result;
 use biometal::operations::{complexity_score, gc_content, mean_quality};
@@ -55,8 +54,6 @@ pub struct IngestResult {
     pub reads: ReadInfo,
     /// Quick-scan statistics from first N reads
     pub quick_scan: QuickScanStats,
-    /// Sample composition estimate from marker k-mer screening
-    pub composition: Option<CompositionEstimate>,
     /// Recommendations for QC configuration
     pub recommendations: Vec<Recommendation>,
     /// Warnings about potential issues
@@ -159,8 +156,6 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     // Complexity score collection
     let mut complexity_scores: Vec<f64> = Vec::with_capacity(SCAN_SIZE);
 
-    // Collect sequences for marker screening
-    let mut scanned_sequences: Vec<Vec<u8>> = Vec::with_capacity(SCAN_SIZE);
 
     for record in stream {
         let record = record?;
@@ -193,9 +188,6 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
 
         // Complexity score
         complexity_scores.push(complexity_score(seq));
-
-        // Collect sequence for marker screening
-        scanned_sequences.push(seq.to_vec());
 
         // N bases
         let n_count = seq.iter().filter(|&&b| b == b'N' || b == b'n').count();
@@ -312,12 +304,6 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
                 .map(|f| f.config_names.iter().map(|s| s.to_string()).collect())
         })
         .unwrap_or_default();
-
-    // Marker k-mer screening for sample composition
-    let marker_db = MarkerDb::new();
-    let composition = Some(
-        marker_db.screen_reads(scanned_sequences.iter().map(|s| s.as_slice())),
-    );
 
     // Estimate total reads from file size
     let estimated_read_count = estimate_read_count(r1_path, total_reads, total_bases);
@@ -454,27 +440,10 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         warnings.push("Phred+64 quality encoding detected: old Illumina format".into());
     }
 
-    // Composition-based warnings
-    if let Some(ref comp) = composition {
-        if comp.human_fraction > 0.50 {
-            warnings.push(format!(
-                "High human content ({:.0}%): expect significant host read removal",
-                comp.human_fraction * 100.0
-            ));
-        }
-        if comp.phix_fraction > 0.05 {
-            warnings.push(format!(
-                "High PhiX content ({:.1}%): check if PhiX spike-in was excessive",
-                comp.phix_fraction * 100.0
-            ));
-        }
-    }
-
     Ok(IngestResult {
         platform,
         reads,
         quick_scan,
-        composition,
         recommendations,
         warnings,
     })
