@@ -156,7 +156,6 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     // Complexity score collection
     let mut complexity_scores: Vec<f64> = Vec::with_capacity(SCAN_SIZE);
 
-
     for record in stream {
         let record = record?;
 
@@ -275,7 +274,13 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     // Quality encoding: Phred+33 (modern standard) vs Phred+64 (Illumina 1.3-1.7, pre-2011)
     // If min quality byte < 59, definitely Phred+33 (can't be a valid Phred+64 quality)
     // Ambiguous range 59-64 exists but all modern data is Phred+33
-    let quality_offset = if min_qual_byte < 59 { 33 } else if min_qual_byte >= 75 { 64 } else { 33 };
+    let quality_offset = if min_qual_byte < 59 {
+        33
+    } else if min_qual_byte >= 75 {
+        64
+    } else {
+        33
+    };
 
     // Quality binning detection
     let distinct_quality_values = quality_value_seen.iter().filter(|&&v| v).count();
@@ -390,9 +395,7 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         recommendations.push(Recommendation {
             parameter: "quality.window_size".into(),
             value: format!("{}", (read_length / 8).max(4)),
-            reason: format!(
-                "Short reads ({read_length}bp): smaller quality window recommended"
-            ),
+            reason: format!("Short reads ({read_length}bp): smaller quality window recommended"),
         });
     }
 
@@ -413,7 +416,11 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
 
     // Adapter warnings
     if let Some(ref adapter) = quick_scan.dominant_adapter {
-        let rate = quick_scan.adapter_rates.get(adapter).copied().unwrap_or(0.0);
+        let rate = quick_scan
+            .adapter_rates
+            .get(adapter)
+            .copied()
+            .unwrap_or(0.0);
         if rate > 0.05 {
             warnings.push(format!(
                 "High adapter contamination ({:.1}% {adapter}): consider verifying insert size distribution",

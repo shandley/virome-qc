@@ -75,7 +75,11 @@ impl AtomicHistogram {
     pub fn snapshot(&self) -> Histogram {
         Histogram {
             bin_edges: self.bin_edges.clone(),
-            counts: self.counts.iter().map(|c| c.load(Ordering::Relaxed)).collect(),
+            counts: self
+                .counts
+                .iter()
+                .map(|c| c.load(Ordering::Relaxed))
+                .collect(),
             underflow: self.underflow.load(Ordering::Relaxed),
             overflow: self.overflow.load(Ordering::Relaxed),
             total: self.total.load(Ordering::Relaxed),
@@ -195,9 +199,8 @@ impl PositionBaseTracker {
         let max_pos = (self.max_pos.load(Ordering::Relaxed) as usize).min(MAX_POSITION);
         let mut positions = Vec::with_capacity(max_pos);
         for pos in 0..max_pos {
-            let counts: [u64; 5] = std::array::from_fn(|i| {
-                self.bases[pos][i].load(Ordering::Relaxed)
-            });
+            let counts: [u64; 5] =
+                std::array::from_fn(|i| self.bases[pos][i].load(Ordering::Relaxed));
             let total: u64 = counts.iter().sum();
             if total == 0 {
                 continue;
@@ -250,7 +253,6 @@ pub struct ReadAnalytics {
 
     // Duplication estimate (HyperLogLog)
     hll: Mutex<HyperLogLog>,
-
     // Survival funnel (populated at snapshot time from module reports)
 }
 
@@ -710,7 +712,11 @@ mod tests {
         assert_eq!(truseq.unwrap().count, 2);
         let nextera = snap.adapters.breakdown.iter().find(|a| a.name == "Nextera");
         assert_eq!(nextera.unwrap().count, 1);
-        let internal = snap.adapters.breakdown.iter().find(|a| a.name == "Internal");
+        let internal = snap
+            .adapters
+            .breakdown
+            .iter()
+            .find(|a| a.name == "Internal");
         assert_eq!(internal.unwrap().count, 1);
     }
 

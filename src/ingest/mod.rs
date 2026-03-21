@@ -13,4 +13,4 @@ mod scan;
 
 pub use overrides::apply_overrides;
 pub use platform::PlatformInfo;
-pub use scan::{IngestResult, QuickScanStats, ReadInfo, Recommendation, ingest_fastq};
+pub use scan::{ingest_fastq, IngestResult, QuickScanStats, ReadInfo, Recommendation};

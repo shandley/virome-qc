@@ -30,7 +30,9 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
     for m in &passport.modules {
         let pct = if passport.reads_input > 0 {
             m.reads_removed as f64 / passport.reads_input as f64 * 100.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         reads_remaining = reads_remaining.saturating_sub(m.reads_removed);
         let bar_w = (pct * 2.0).min(100.0);
         funnel_rows.push_str(&format!(
@@ -45,8 +47,16 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
     for m in &passport.modules {
         if m.name == "contaminant" {
             if let Some(rrna) = m.extra.get("rrna_removed").and_then(|v| v.as_u64()) {
-                let prok = m.extra.get("rrna_prokaryotic").and_then(|v| v.as_u64()).unwrap_or(0);
-                let euk = m.extra.get("rrna_eukaryotic").and_then(|v| v.as_u64()).unwrap_or(0);
+                let prok = m
+                    .extra
+                    .get("rrna_prokaryotic")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let euk = m
+                    .extra
+                    .get("rrna_eukaryotic")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 contaminant_cards.push_str(&format!(
                     r#"<div class="card"><div class="card-value" style="color:var(--chart-1)">{:.2}%</div><div class="card-label">rRNA</div><div class="card-sub">{} reads ({} prok / {} euk)</div></div>"#,
                     rrna as f64 / ri * 100.0, fmt(rrna), fmt(prok), fmt(euk)
@@ -70,10 +80,18 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
     let flags_html = if passport.flags.is_empty() {
         r#"<div class="card" style="text-align:center"><span class="badge pass">No quality flags raised</span></div>"#.to_string()
     } else {
-        passport.flags.iter().map(|f| {
-            let cls = format!("{:?}", f.severity).to_lowercase();
-            format!(r#"<div class="alert {cls}"><strong>{}</strong> {}</div>"#, f.code, f.message)
-        }).collect::<Vec<_>>().join("\n")
+        passport
+            .flags
+            .iter()
+            .map(|f| {
+                let cls = format!("{:?}", f.severity).to_lowercase();
+                format!(
+                    r#"<div class="alert {cls}"><strong>{}</strong> {}</div>"#,
+                    f.code, f.message
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     };
 
     let paired_html = if passport.pairs_passed > 0 {
@@ -81,7 +99,9 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
         let tp = total_pairs.max(1) as f64;
         let merge_pct = if passport.pairs_passed > 0 {
             passport.pairs_merged as f64 / passport.pairs_passed as f64 * 100.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         format!(
             r#"<div class="card"><div class="card-value">{}</div><div class="card-label">Pairs</div><div class="card-sub">{:.1}% of input pairs</div></div>
             <div class="card"><div class="card-value">{}</div><div class="card-label">Singletons</div><div class="card-sub">{:.1}% orphaned</div></div>
@@ -93,7 +113,9 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
             fmt(passport.pairs_merged),
             merge_pct,
         )
-    } else { String::new() };
+    } else {
+        String::new()
+    };
 
     let dup_html = passport.qa_stats.as_ref().map(|qa| {
         format!(
@@ -106,7 +128,11 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
     let mut adapter_cards = String::new();
     if let Some(ref qa) = passport.qa_stats {
         for a in &qa.adapters.breakdown {
-            let pct = if passport.reads_input > 0 { a.count as f64 / passport.reads_input as f64 * 100.0 } else { 0.0 };
+            let pct = if passport.reads_input > 0 {
+                a.count as f64 / passport.reads_input as f64 * 100.0
+            } else {
+                0.0
+            };
             adapter_cards.push_str(&format!(
                 r#"<div class="card"><div class="card-value" style="color:var(--chart-1)">{}</div><div class="card-label">{}</div><div class="card-sub">{:.2}% of reads</div></div>"#,
                 fmt(a.count), a.name, pct
@@ -126,7 +152,8 @@ fn build_html(passport_json: &str, passport: &Passport) -> String {
 
     // Insert size visibility is handled in JS based on data
 
-    format!(r##"<!DOCTYPE html>
+    format!(
+        r##"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -513,7 +540,11 @@ function toggleTheme() {{
 }
 
 fn fmt(n: u64) -> String {
-    if n >= 1_000_000 { format!("{:.1}M", n as f64 / 1_000_000.0) }
-    else if n >= 1_000 { format!("{:.1}K", n as f64 / 1_000.0) }
-    else { format!("{n}") }
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        format!("{n}")
+    }
 }

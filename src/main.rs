@@ -134,7 +134,12 @@ fn main() -> Result<()> {
                     );
                 }
                 if let Some(ref adapter) = ingest.quick_scan.dominant_adapter {
-                    let rate = ingest.quick_scan.adapter_rates.get(adapter).copied().unwrap_or(0.0);
+                    let rate = ingest
+                        .quick_scan
+                        .adapter_rates
+                        .get(adapter)
+                        .copied()
+                        .unwrap_or(0.0);
                     eprintln!("Adapters:  {} detected ({:.1}%)", adapter, rate * 100.0);
                 }
                 for w in &ingest.warnings {
@@ -246,7 +251,10 @@ fn main() -> Result<()> {
                 if let Some(ref plat) = result.platform {
                     println!("Platform:     {} ({})", plat.model, plat.instrument_id);
                     println!("Chemistry:    {:?}", plat.chemistry);
-                    println!("Flowcell:     {}", plat.flowcell_id.as_deref().unwrap_or("--"));
+                    println!(
+                        "Flowcell:     {}",
+                        plat.flowcell_id.as_deref().unwrap_or("--")
+                    );
                     println!("Patterned:    {}", plat.patterned_flowcell);
                 } else {
                     println!("Platform:     Unknown (non-Illumina or unrecognized header)");
@@ -254,9 +262,15 @@ fn main() -> Result<()> {
                 println!();
 
                 let r = &result.reads;
-                println!("Read length:  {}bp{}", r.read_length,
-                    if r.variable_length { " (variable)" } else { "" });
-                println!("Layout:       {}", if r.paired { "paired-end" } else { "single-end" });
+                println!(
+                    "Read length:  {}bp{}",
+                    r.read_length,
+                    if r.variable_length { " (variable)" } else { "" }
+                );
+                println!(
+                    "Layout:       {}",
+                    if r.paired { "paired-end" } else { "single-end" }
+                );
                 println!("Quality enc:  Phred+{}", r.quality_offset);
                 if let Some(est) = r.estimated_read_count {
                     println!("Est. reads:   ~{:.1}M", est as f64 / 1_000_000.0);
@@ -269,10 +283,19 @@ fn main() -> Result<()> {
                 println!("Mean GC:      {:.1}%", qs.mean_gc * 100.0);
                 println!("N-rate:       {:.3}%", qs.n_rate * 100.0);
                 println!("N-rate pos 0: {:.2}%", qs.n_rate_pos0 * 100.0);
-                println!("Q-binned:     {}{}", qs.quality_binned,
-                    if qs.quality_binned { format!(" ({} distinct values)", qs.distinct_quality_values) } else { String::new() });
-                println!("Complexity:   median={:.3} p2={:.3} p5={:.3}",
-                    qs.complexity_median, qs.complexity_p2, qs.complexity_p5);
+                println!(
+                    "Q-binned:     {}{}",
+                    qs.quality_binned,
+                    if qs.quality_binned {
+                        format!(" ({} distinct values)", qs.distinct_quality_values)
+                    } else {
+                        String::new()
+                    }
+                );
+                println!(
+                    "Complexity:   median={:.3} p2={:.3} p5={:.3}",
+                    qs.complexity_median, qs.complexity_p2, qs.complexity_p5
+                );
                 if let Some(ref adapter) = qs.dominant_adapter {
                     let rate = qs.adapter_rates.get(adapter).copied().unwrap_or(0.0);
                     println!("Adapters:     {adapter} ({:.1}%)", rate * 100.0);

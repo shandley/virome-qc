@@ -94,10 +94,7 @@ impl Pipeline {
         let mut total_failed = 0u64;
 
         for input_path in input_files {
-            let stem = input_path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy();
+            let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
             // Strip .fastq/.fq from stem if double-extension (e.g., sample.fastq.gz → sample)
             let stem = stem
                 .strip_suffix(".fastq")
@@ -160,15 +157,12 @@ impl Pipeline {
         let paired_stream = PairedFastqStream::from_paths(r1_path, r2_path)?;
 
         // Open output writers (gzip compressed)
-        let writer_r1 = std::sync::Mutex::new(FastqWriter::create(
-            output_dir.join("clean_R1.fastq.gz"),
-        )?);
-        let writer_r2 = std::sync::Mutex::new(FastqWriter::create(
-            output_dir.join("clean_R2.fastq.gz"),
-        )?);
-        let writer_singletons = std::sync::Mutex::new(FastqWriter::create(
-            output_dir.join("singletons.fastq.gz"),
-        )?);
+        let writer_r1 =
+            std::sync::Mutex::new(FastqWriter::create(output_dir.join("clean_R1.fastq.gz"))?);
+        let writer_r2 =
+            std::sync::Mutex::new(FastqWriter::create(output_dir.join("clean_R2.fastq.gz"))?);
+        let writer_singletons =
+            std::sync::Mutex::new(FastqWriter::create(output_dir.join("singletons.fastq.gz"))?);
         let writer_merged = if merge {
             Some(std::sync::Mutex::new(FastqWriter::create(
                 output_dir.join("merged.fastq.gz"),
@@ -342,8 +336,16 @@ impl Pipeline {
                                 ctx.pairs_passed.fetch_add(1, Ordering::Relaxed);
                             }
                             MergeResult::Unmerged(r1, r2) => {
-                                ctx.qa.record_passed(&r1.sequence, &r1.quality, ann_r1.total_trimmed());
-                                ctx.qa.record_passed(&r2.sequence, &r2.quality, ann_r2.total_trimmed());
+                                ctx.qa.record_passed(
+                                    &r1.sequence,
+                                    &r1.quality,
+                                    ann_r1.total_trimmed(),
+                                );
+                                ctx.qa.record_passed(
+                                    &r2.sequence,
+                                    &r2.quality,
+                                    ann_r2.total_trimmed(),
+                                );
                                 w_r1.write_record(&r1)?;
                                 w_r2.write_record(&r2)?;
                                 ctx.reads_passed.fetch_add(2, Ordering::Relaxed);
@@ -351,8 +353,16 @@ impl Pipeline {
                             }
                         }
                     } else {
-                        ctx.qa.record_passed(&ann_r1.record.sequence, &ann_r1.record.quality, ann_r1.total_trimmed());
-                        ctx.qa.record_passed(&ann_r2.record.sequence, &ann_r2.record.quality, ann_r2.total_trimmed());
+                        ctx.qa.record_passed(
+                            &ann_r1.record.sequence,
+                            &ann_r1.record.quality,
+                            ann_r1.total_trimmed(),
+                        );
+                        ctx.qa.record_passed(
+                            &ann_r2.record.sequence,
+                            &ann_r2.record.quality,
+                            ann_r2.total_trimmed(),
+                        );
                         w_r1.write_record(&ann_r1.record)?;
                         w_r2.write_record(&ann_r2.record)?;
                         ctx.reads_passed.fetch_add(2, Ordering::Relaxed);
@@ -360,7 +370,11 @@ impl Pipeline {
                     }
                 }
                 (true, false) => {
-                    ctx.qa.record_passed(&ann_r1.record.sequence, &ann_r1.record.quality, ann_r1.total_trimmed());
+                    ctx.qa.record_passed(
+                        &ann_r1.record.sequence,
+                        &ann_r1.record.quality,
+                        ann_r1.total_trimmed(),
+                    );
                     ctx.qa.record_failed();
                     w_sing.write_record(&ann_r1.record)?;
                     ctx.reads_passed.fetch_add(1, Ordering::Relaxed);
@@ -369,7 +383,11 @@ impl Pipeline {
                 }
                 (false, true) => {
                     ctx.qa.record_failed();
-                    ctx.qa.record_passed(&ann_r2.record.sequence, &ann_r2.record.quality, ann_r2.total_trimmed());
+                    ctx.qa.record_passed(
+                        &ann_r2.record.sequence,
+                        &ann_r2.record.quality,
+                        ann_r2.total_trimmed(),
+                    );
                     w_sing.write_record(&ann_r2.record)?;
                     ctx.reads_passed.fetch_add(1, Ordering::Relaxed);
                     ctx.reads_failed.fetch_add(1, Ordering::Relaxed);

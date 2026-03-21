@@ -97,7 +97,8 @@ impl QualityTrimmer {
 
     /// Standard mean-quality sliding window trim from 3' end (for non-binned data)
     fn trim_window_standard(&self, record: &FastqRecord) -> FastqRecord {
-        match biometal::operations::trim_quality_window(record, self.min_quality, self.window_size) {
+        match biometal::operations::trim_quality_window(record, self.min_quality, self.window_size)
+        {
             Ok(trimmed) => trimmed,
             Err(_) => record.clone(),
         }
@@ -276,8 +277,16 @@ mod tests {
         trimmer.process(&mut record);
 
         // Should trim the Q2 tail
-        assert!(record.len() <= 84, "Should trim Q2 tail, got len={}", record.len());
-        assert!(record.len() >= 76, "Should not over-trim, got len={}", record.len());
+        assert!(
+            record.len() <= 84,
+            "Should trim Q2 tail, got len={}",
+            record.len()
+        );
+        assert!(
+            record.len() >= 76,
+            "Should not over-trim, got len={}",
+            record.len()
+        );
         assert!(!record.is_failed());
     }
 
@@ -300,8 +309,16 @@ mod tests {
         trimmer.process(&mut record);
 
         // Should trim the Q2 section but keep the mixed good region
-        assert!(record.len() >= 36, "Should keep good region, got len={}", record.len());
-        assert!(record.len() <= 44, "Should trim bad tail, got len={}", record.len());
+        assert!(
+            record.len() >= 36,
+            "Should keep good region, got len={}",
+            record.len()
+        );
+        assert!(
+            record.len() <= 44,
+            "Should trim bad tail, got len={}",
+            record.len()
+        );
     }
 
     #[test]

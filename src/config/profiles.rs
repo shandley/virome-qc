@@ -147,10 +147,18 @@ pub struct Thresholds {
 }
 
 // Default value functions for serde
-fn default_min_overlap() -> usize { 10 }
-fn default_max_mismatch_rate() -> f64 { 0.1 }
-fn default_min_polyx_len() -> usize { 10 }
-fn default_contaminant_threshold() -> f64 { 0.4 }
+fn default_min_overlap() -> usize {
+    10
+}
+fn default_max_mismatch_rate() -> f64 {
+    0.1
+}
+fn default_min_polyx_len() -> usize {
+    10
+}
+fn default_contaminant_threshold() -> f64 {
+    0.4
+}
 
 /// Profile loader and manager
 pub struct Profile;
@@ -301,9 +309,7 @@ impl Profile {
                     optical_distance: 2500,
                     umi_aware: false,
                 },
-                chimera: ChimeraConfig {
-                    enabled: false,
-                },
+                chimera: ChimeraConfig { enabled: false },
             },
             thresholds: Thresholds {
                 min_survival_rate: 0.30,
@@ -365,9 +371,7 @@ impl Profile {
                     optical_distance: 2500,
                     umi_aware: false,
                 },
-                chimera: ChimeraConfig {
-                    enabled: false,
-                },
+                chimera: ChimeraConfig { enabled: false },
             },
             thresholds: Thresholds {
                 min_survival_rate: 0.01, // tissue may lose >99% to host
@@ -429,9 +433,7 @@ impl Profile {
                     optical_distance: 2500,
                     umi_aware: false,
                 },
-                chimera: ChimeraConfig {
-                    enabled: false,
-                },
+                chimera: ChimeraConfig { enabled: false },
             },
             thresholds: Thresholds {
                 min_survival_rate: 0.10,

@@ -79,9 +79,12 @@ impl AdapterTrimmer {
     fn find_3prime_adapter(&self, sequence: &[u8]) -> Option<(usize, String)> {
         for adapter_set in &self.adapter_sets {
             for adapter_seq in &adapter_set.sequences {
-                if let Some(pos) =
-                    find_adapter_overlap(sequence, adapter_seq, self.min_overlap, self.max_mismatch_rate)
-                {
+                if let Some(pos) = find_adapter_overlap(
+                    sequence,
+                    adapter_seq,
+                    self.min_overlap,
+                    self.max_mismatch_rate,
+                ) {
                     return Some((pos, adapter_set.name.clone()));
                 }
             }

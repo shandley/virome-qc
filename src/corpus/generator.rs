@@ -23,7 +23,10 @@ impl Rng {
 
     fn next_u64(&mut self) -> u64 {
         // LCG parameters from Numerical Recipes
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.state
     }
 
@@ -250,69 +253,66 @@ impl CorpusGenerator {
         let mut summary = CorpusSummary::default();
 
         // Pre-generate some reads for PCR duplication
-        let dup_source_count = (self.config.num_reads as f64 * self.config.pcr_dup_rate * 0.5) as usize;
+        let dup_source_count =
+            (self.config.num_reads as f64 * self.config.pcr_dup_rate * 0.5) as usize;
         let mut dup_sources: Vec<(FastqRecord, ReadLabels)> = Vec::new();
 
         for i in 0..self.config.num_reads {
-            let (record, labels) = if !dup_sources.is_empty()
-                && self.rng.next_f64() < self.config.pcr_dup_rate
-            {
-                // Generate a PCR duplicate
-                let source_idx = self.rng.next_usize(dup_sources.len());
-                let (source_record, source_labels) = &dup_sources[source_idx];
-                let mut labels = source_labels.clone();
-                labels.add(ReadLabel::PcrDuplicate(source_record.id.clone()));
-                summary.pcr_duplicates += 1;
+            let (record, labels) =
+                if !dup_sources.is_empty() && self.rng.next_f64() < self.config.pcr_dup_rate {
+                    // Generate a PCR duplicate
+                    let source_idx = self.rng.next_usize(dup_sources.len());
+                    let (source_record, source_labels) = &dup_sources[source_idx];
+                    let mut labels = source_labels.clone();
+                    labels.add(ReadLabel::PcrDuplicate(source_record.id.clone()));
+                    summary.pcr_duplicates += 1;
 
-                let record = FastqRecord::new(
-                    format!("read_{:06} {}", i, labels.to_comment()),
-                    source_record.sequence.clone(),
-                    source_record.quality.clone(),
-                );
-                (record, labels)
-            } else {
-                // Generate a fresh read
-                let (mut seq, mut labels) = self.generate_base_read(i);
-
-                // Apply artifacts
-                self.maybe_add_adapter_3prime(&mut seq, &mut labels);
-                self.maybe_add_adapter_internal(&mut seq, &mut labels);
-                self.maybe_add_random_primer(&mut seq, &mut labels);
-                self.maybe_add_poly_g(&mut seq, &mut labels);
-
-                // Generate quality scores (with possible tail degradation)
-                let tail_start = if self.rng.next_f64() < self.config.quality_tail_rate {
-                    let pos = self.config.read_length / 2
-                        + self.rng.next_usize(self.config.read_length / 3);
-                    labels.add(ReadLabel::QualityTail(pos));
-                    summary.quality_tails += 1;
-                    Some(pos.min(seq.len()))
-                } else {
-                    None
-                };
-
-                let quality = self.rng.quality_scores(seq.len(), 35, tail_start);
-
-                // Save as potential dup source
-                if dup_sources.len() < dup_source_count {
                     let record = FastqRecord::new(
-                        format!("read_{i:06}"),
-                        seq.clone(),
-                        quality.clone(),
+                        format!("read_{:06} {}", i, labels.to_comment()),
+                        source_record.sequence.clone(),
+                        source_record.quality.clone(),
                     );
-                    dup_sources.push((record, labels.clone()));
-                }
+                    (record, labels)
+                } else {
+                    // Generate a fresh read
+                    let (mut seq, mut labels) = self.generate_base_read(i);
 
-                // Update summary
-                self.update_summary(&labels, &mut summary);
+                    // Apply artifacts
+                    self.maybe_add_adapter_3prime(&mut seq, &mut labels);
+                    self.maybe_add_adapter_internal(&mut seq, &mut labels);
+                    self.maybe_add_random_primer(&mut seq, &mut labels);
+                    self.maybe_add_poly_g(&mut seq, &mut labels);
 
-                let record = FastqRecord::new(
-                    format!("read_{:06} {}", i, labels.to_comment()),
-                    seq,
-                    quality,
-                );
-                (record, labels)
-            };
+                    // Generate quality scores (with possible tail degradation)
+                    let tail_start = if self.rng.next_f64() < self.config.quality_tail_rate {
+                        let pos = self.config.read_length / 2
+                            + self.rng.next_usize(self.config.read_length / 3);
+                        labels.add(ReadLabel::QualityTail(pos));
+                        summary.quality_tails += 1;
+                        Some(pos.min(seq.len()))
+                    } else {
+                        None
+                    };
+
+                    let quality = self.rng.quality_scores(seq.len(), 35, tail_start);
+
+                    // Save as potential dup source
+                    if dup_sources.len() < dup_source_count {
+                        let record =
+                            FastqRecord::new(format!("read_{i:06}"), seq.clone(), quality.clone());
+                        dup_sources.push((record, labels.clone()));
+                    }
+
+                    // Update summary
+                    self.update_summary(&labels, &mut summary);
+
+                    let record = FastqRecord::new(
+                        format!("read_{:06} {}", i, labels.to_comment()),
+                        seq,
+                        quality,
+                    );
+                    (record, labels)
+                };
 
             let _ = labels; // labels already encoded in record ID
             writer.write_record(&record)?;
@@ -417,10 +417,7 @@ impl CorpusGenerator {
             self.maybe_add_poly_g(&mut r2_seq, &mut r2_labels);
 
             // Add insert size to labels
-            r1_labels.add(ReadLabel::Source(format!(
-                "insert_size={}",
-                insert_size
-            )));
+            r1_labels.add(ReadLabel::Source(format!("insert_size={}", insert_size)));
 
             // Generate quality scores
             let r1_tail = if self.rng.next_f64() < self.config.quality_tail_rate {
@@ -594,7 +591,10 @@ impl CorpusGenerator {
 
         let adapter = &ADAPTERS[self.rng.next_usize(ADAPTERS.len())];
         // Simulate varying insert sizes: overlap = 10 to adapter.len()
-        let overlap = 10 + self.rng.next_usize(adapter.sequence.len().saturating_sub(10));
+        let overlap = 10
+            + self
+                .rng
+                .next_usize(adapter.sequence.len().saturating_sub(10));
         let overlap = overlap.min(adapter.sequence.len());
 
         // Truncate read to make room, then append adapter
@@ -622,8 +622,7 @@ impl CorpusGenerator {
         let insert_pos = 20 + self.rng.next_usize(seq.len() - 40);
         let end_pos = (insert_pos + adapter_fragment_len).min(seq.len());
 
-        seq[insert_pos..end_pos]
-            .copy_from_slice(&adapter.sequence[..end_pos - insert_pos]);
+        seq[insert_pos..end_pos].copy_from_slice(&adapter.sequence[..end_pos - insert_pos]);
 
         labels.add(ReadLabel::AdapterInternal(insert_pos));
     }
@@ -703,18 +702,62 @@ impl CorpusSummary {
         println!("=== Corpus Summary ===");
         println!("Total reads:          {:>8}", self.total_reads);
         println!("--- Source composition ---");
-        println!("  Viral:              {:>8} ({:.1}%)", self.viral_reads, self.pct(self.viral_reads));
-        println!("  Host:               {:>8} ({:.1}%)", self.host_reads, self.pct(self.host_reads));
-        println!("  rRNA:               {:>8} ({:.1}%)", self.rrna_reads, self.pct(self.rrna_reads));
-        println!("  PhiX:               {:>8} ({:.1}%)", self.phix_reads, self.pct(self.phix_reads));
-        println!("  Low complexity:     {:>8} ({:.1}%)", self.low_complexity_reads, self.pct(self.low_complexity_reads));
-        println!("  Background:         {:>8} ({:.1}%)", self.background_reads, self.pct(self.background_reads));
+        println!(
+            "  Viral:              {:>8} ({:.1}%)",
+            self.viral_reads,
+            self.pct(self.viral_reads)
+        );
+        println!(
+            "  Host:               {:>8} ({:.1}%)",
+            self.host_reads,
+            self.pct(self.host_reads)
+        );
+        println!(
+            "  rRNA:               {:>8} ({:.1}%)",
+            self.rrna_reads,
+            self.pct(self.rrna_reads)
+        );
+        println!(
+            "  PhiX:               {:>8} ({:.1}%)",
+            self.phix_reads,
+            self.pct(self.phix_reads)
+        );
+        println!(
+            "  Low complexity:     {:>8} ({:.1}%)",
+            self.low_complexity_reads,
+            self.pct(self.low_complexity_reads)
+        );
+        println!(
+            "  Background:         {:>8} ({:.1}%)",
+            self.background_reads,
+            self.pct(self.background_reads)
+        );
         println!("--- Artifacts ---");
-        println!("  3' adapter:         {:>8} ({:.1}%)", self.adapter_3prime_reads, self.pct(self.adapter_3prime_reads));
-        println!("  Internal adapter:   {:>8} ({:.1}%)", self.adapter_internal_reads, self.pct(self.adapter_internal_reads));
-        println!("  Poly-G tail:        {:>8} ({:.1}%)", self.poly_g_reads, self.pct(self.poly_g_reads));
-        println!("  Quality tail:       {:>8} ({:.1}%)", self.quality_tails, self.pct(self.quality_tails));
-        println!("  PCR duplicates:     {:>8} ({:.1}%)", self.pcr_duplicates, self.pct(self.pcr_duplicates));
+        println!(
+            "  3' adapter:         {:>8} ({:.1}%)",
+            self.adapter_3prime_reads,
+            self.pct(self.adapter_3prime_reads)
+        );
+        println!(
+            "  Internal adapter:   {:>8} ({:.1}%)",
+            self.adapter_internal_reads,
+            self.pct(self.adapter_internal_reads)
+        );
+        println!(
+            "  Poly-G tail:        {:>8} ({:.1}%)",
+            self.poly_g_reads,
+            self.pct(self.poly_g_reads)
+        );
+        println!(
+            "  Quality tail:       {:>8} ({:.1}%)",
+            self.quality_tails,
+            self.pct(self.quality_tails)
+        );
+        println!(
+            "  PCR duplicates:     {:>8} ({:.1}%)",
+            self.pcr_duplicates,
+            self.pct(self.pcr_duplicates)
+        );
     }
 
     fn pct(&self, count: usize) -> f64 {
@@ -750,7 +793,10 @@ mod tests {
         assert_eq!(summary.total_reads, 1000);
         assert!(summary.viral_reads > 0, "Should have viral reads");
         assert!(summary.host_reads > 0, "Should have host reads");
-        assert!(summary.adapter_3prime_reads > 0, "Should have adapter reads");
+        assert!(
+            summary.adapter_3prime_reads > 0,
+            "Should have adapter reads"
+        );
 
         // Verify file exists and is readable
         assert!(path.exists());

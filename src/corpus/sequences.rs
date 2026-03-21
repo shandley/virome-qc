@@ -142,8 +142,16 @@ mod tests {
     #[test]
     fn test_viral_references_nonempty() {
         for vref in VIRAL_REFERENCES {
-            assert!(!vref.sequence.is_empty(), "Empty sequence for {}", vref.name);
-            assert!(vref.sequence.len() >= 100, "Short sequence for {}", vref.name);
+            assert!(
+                !vref.sequence.is_empty(),
+                "Empty sequence for {}",
+                vref.name
+            );
+            assert!(
+                vref.sequence.len() >= 100,
+                "Short sequence for {}",
+                vref.name
+            );
         }
     }
 }

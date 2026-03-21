@@ -50,15 +50,19 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
 
         // Quality window: ~1/8 of read length, at least 4, at most 25
         if read_length <= 100 {
-            profile.modules.quality.window_size =
-                (read_length / 8).clamp(4, 25);
+            profile.modules.quality.window_size = (read_length / 8).clamp(4, 25);
         }
     }
 
     // Adapter overlap threshold: high adapter rate suggests short inserts,
     // lower the min_overlap to catch more short adapter overlaps
     if let Some(ref adapter) = ingest.quick_scan.dominant_adapter {
-        let rate = ingest.quick_scan.adapter_rates.get(adapter).copied().unwrap_or(0.0);
+        let rate = ingest
+            .quick_scan
+            .adapter_rates
+            .get(adapter)
+            .copied()
+            .unwrap_or(0.0);
         if rate > 0.10 {
             // >10% adapter contamination -- inserts are short, lower overlap threshold
             profile.modules.adapter.min_overlap = 6;
@@ -72,9 +76,9 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
     if !ingest.quick_scan.detected_adapter_configs.is_empty() {
         let detected = &ingest.quick_scan.detected_adapter_configs;
         // Only override if the detected adapters are different from profile
-        let profile_has_detected = detected.iter().any(|d| {
-            profile.modules.adapter.sequences.iter().any(|s| s == d)
-        });
+        let profile_has_detected = detected
+            .iter()
+            .any(|d| profile.modules.adapter.sequences.iter().any(|s| s == d));
         if !profile_has_detected {
             // Replace adapter sequences with detected set
             profile.modules.adapter.sequences = detected.clone();
@@ -121,7 +125,11 @@ mod tests {
                 model: model.into(),
                 chemistry,
                 patterned_flowcell: chemistry == Chemistry::TwoColor,
-                quality_bins: if chemistry == Chemistry::TwoColor { Some(3) } else { None },
+                quality_bins: if chemistry == Chemistry::TwoColor {
+                    Some(3)
+                } else {
+                    None
+                },
                 flowcell_id: None,
             }),
             reads: ReadInfo {

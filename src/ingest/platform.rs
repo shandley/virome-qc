@@ -179,92 +179,47 @@ fn detect_model(instrument_id: &str) -> (String, Chemistry, bool, Option<u8>) {
 
     // NovaSeq X / X Plus (LH prefix)
     if id_upper.starts_with("LH") {
-        return (
-            "NovaSeq X".into(),
-            Chemistry::TwoColor,
-            true,
-            Some(3),
-        );
+        return ("NovaSeq X".into(), Chemistry::TwoColor, true, Some(3));
     }
 
     // NovaSeq 6000 (A prefix, typically A00xxx)
     if id_upper.starts_with("A0") {
-        return (
-            "NovaSeq 6000".into(),
-            Chemistry::TwoColor,
-            true,
-            Some(3),
-        );
+        return ("NovaSeq 6000".into(), Chemistry::TwoColor, true, Some(3));
     }
 
     // NextSeq 1000/2000 (VH prefix)
     if id_upper.starts_with("VH") {
-        return (
-            "NextSeq 2000".into(),
-            Chemistry::TwoColor,
-            true,
-            Some(3),
-        );
+        return ("NextSeq 2000".into(), Chemistry::TwoColor, true, Some(3));
     }
 
     // NextSeq 500/550 (NB or NS prefix)
     if id_upper.starts_with("NB") || id_upper.starts_with("NS") {
-        return (
-            "NextSeq 500".into(),
-            Chemistry::TwoColor,
-            true,
-            Some(3),
-        );
+        return ("NextSeq 500".into(), Chemistry::TwoColor, true, Some(3));
     }
 
     // MiSeq (M prefix, typically M0xxxx)
     if id_upper.starts_with("M0") || id_upper.starts_with("M1") {
-        return (
-            "MiSeq".into(),
-            Chemistry::FourColor,
-            false,
-            None,
-        );
+        return ("MiSeq".into(), Chemistry::FourColor, false, None);
     }
 
     // HiSeq 3000/4000 (J prefix)
     if id_upper.starts_with('J') {
-        return (
-            "HiSeq 3000/4000".into(),
-            Chemistry::FourColor,
-            true,
-            None,
-        );
+        return ("HiSeq 3000/4000".into(), Chemistry::FourColor, true, None);
     }
 
     // HiSeq 2500 (D prefix in rapid mode, SN in high-output)
     if id_upper.starts_with('D') {
-        return (
-            "HiSeq 2500".into(),
-            Chemistry::FourColor,
-            false,
-            None,
-        );
+        return ("HiSeq 2500".into(), Chemistry::FourColor, false, None);
     }
 
     // HiSeq 2000 (SN prefix)
     if id_upper.starts_with("SN") {
-        return (
-            "HiSeq 2000".into(),
-            Chemistry::FourColor,
-            false,
-            None,
-        );
+        return ("HiSeq 2000".into(), Chemistry::FourColor, false, None);
     }
 
     // iSeq (FS prefix)
     if id_upper.starts_with("FS") {
-        return (
-            "iSeq 100".into(),
-            Chemistry::TwoColor,
-            true,
-            Some(3),
-        );
+        return ("iSeq 100".into(), Chemistry::TwoColor, true, Some(3));
     }
 
     // Element Biosciences AVITI

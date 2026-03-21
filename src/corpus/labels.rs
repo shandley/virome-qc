@@ -76,15 +76,11 @@ impl ReadLabels {
     }
 
     pub fn is_host(&self) -> bool {
-        self.labels
-            .iter()
-            .any(|l| matches!(l, ReadLabel::Host(_)))
+        self.labels.iter().any(|l| matches!(l, ReadLabel::Host(_)))
     }
 
     pub fn is_rrna(&self) -> bool {
-        self.labels
-            .iter()
-            .any(|l| matches!(l, ReadLabel::Rrna(_)))
+        self.labels.iter().any(|l| matches!(l, ReadLabel::Rrna(_)))
     }
 
     pub fn is_phix(&self) -> bool {

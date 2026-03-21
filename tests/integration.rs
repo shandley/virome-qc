@@ -98,8 +98,13 @@ fn test_single_end_pipeline_against_corpus() {
 
     // Validate: output file exists (gzip compressed) and has reads
     let output_file = output_dir.join("clean_corpus.fastq.gz");
-    assert!(output_file.exists(), "Clean gzipped FASTQ should be written");
-    let clean_count = biometal::FastqStream::from_path(&output_file).unwrap().count();
+    assert!(
+        output_file.exists(),
+        "Clean gzipped FASTQ should be written"
+    );
+    let clean_count = biometal::FastqStream::from_path(&output_file)
+        .unwrap()
+        .count();
     assert_eq!(clean_count as u64, result.reads_passed);
 }
 
@@ -246,7 +251,9 @@ fn test_gzip_input_output() {
     assert!(output_file.exists(), "Output should be .fastq.gz");
 
     // Should be readable by biometal (auto-detects gzip)
-    let count = biometal::FastqStream::from_path(&output_file).unwrap().count();
+    let count = biometal::FastqStream::from_path(&output_file)
+        .unwrap()
+        .count();
     assert_eq!(count as u64, result.reads_passed);
     assert!(result.reads_passed > 0);
 }

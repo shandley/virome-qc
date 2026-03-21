@@ -142,8 +142,7 @@ impl Passport {
         }
 
         for report in modules {
-            let removal_rate =
-                report.reads_removed as f64 / result.reads_input as f64;
+            let removal_rate = report.reads_removed as f64 / result.reads_input as f64;
 
             match report.name.as_str() {
                 "complexity" => {
@@ -216,10 +215,7 @@ impl Passport {
                             if phix_fraction > 0.05 {
                                 flags.push(QcFlag {
                                     code: "HIGH_PHIX".into(),
-                                    message: format!(
-                                        "{:.2}% PhiX detected",
-                                        phix_fraction * 100.0
-                                    ),
+                                    message: format!("{:.2}% PhiX detected", phix_fraction * 100.0),
                                     severity: QualityTier::Warn,
                                 });
                             }

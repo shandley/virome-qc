@@ -293,7 +293,10 @@ mod tests {
     #[test]
     fn test_index_construction() {
         let screener = ContaminantScreener::new(&make_config(true, true, true));
-        assert!(screener.unified_index.len() > 1000, "Should have substantial index");
+        assert!(
+            screener.unified_index.len() > 1000,
+            "Should have substantial index"
+        );
         assert!(screener.rrna_index.len() > 0);
         assert!(screener.phix_index.len() > 0);
         assert!(screener.vector_index.len() > 0);
@@ -370,7 +373,10 @@ mod tests {
         let mut record = make_record(&chimera);
         screener.process(&mut record);
         // 50/150 = 33% rRNA k-mers, below 40% threshold
-        assert!(!record.is_failed(), "Partial match below threshold should pass");
+        assert!(
+            !record.is_failed(),
+            "Partial match below threshold should pass"
+        );
     }
 
     #[test]
@@ -388,8 +394,16 @@ mod tests {
         assert!(phix_record.is_failed());
 
         let report = screener.report();
-        let rrna_count = report.extra.get("rrna_removed").and_then(|v| v.as_u64()).unwrap_or(0);
-        let phix_count = report.extra.get("phix_removed").and_then(|v| v.as_u64()).unwrap_or(0);
+        let rrna_count = report
+            .extra
+            .get("rrna_removed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let phix_count = report
+            .extra
+            .get("phix_removed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         assert_eq!(rrna_count, 1, "Should count 1 rRNA removal");
         assert_eq!(phix_count, 1, "Should count 1 PhiX removal");
     }
@@ -400,6 +414,9 @@ mod tests {
         let screener = ContaminantScreener::new(&make_config(false, true, false));
         let mut record = make_record(&ECOLI_16S[100..250]);
         screener.process(&mut record);
-        assert!(!record.is_failed(), "rRNA should pass when screening disabled");
+        assert!(
+            !record.is_failed(),
+            "rRNA should pass when screening disabled"
+        );
     }
 }
