@@ -69,6 +69,14 @@ pub struct QualityConfig {
     /// mean quality in sliding window.
     #[serde(default)]
     pub quality_binned: bool,
+    /// Maximum fraction of N bases allowed per read (0.0 - 1.0). Default 0.10.
+    /// Auto-adjusted by ingestion engine based on platform N-rate.
+    #[serde(default = "default_max_n_fraction")]
+    pub max_n_fraction: f64,
+}
+
+fn default_max_n_fraction() -> f64 {
+    0.10
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +271,7 @@ impl Profile {
                     min_mean_quality: 20.0,
                     min_length: 90,
                     quality_binned: false,
+                    max_n_fraction: 0.10,
                 },
                 polyx: PolyXConfig {
                     enabled: true,
@@ -326,6 +335,7 @@ impl Profile {
                     min_mean_quality: 20.0,
                     min_length: 90,
                     quality_binned: false,
+                    max_n_fraction: 0.10,
                 },
                 polyx: PolyXConfig {
                     enabled: true,
@@ -389,6 +399,7 @@ impl Profile {
                     min_mean_quality: 20.0,
                     min_length: 90,
                     quality_binned: false,
+                    max_n_fraction: 0.10,
                 },
                 polyx: PolyXConfig {
                     enabled: true,
@@ -452,6 +463,7 @@ impl Profile {
                     min_mean_quality: 20.0,
                     min_length: 90,
                     quality_binned: false,
+                    max_n_fraction: 0.10,
                 },
                 polyx: PolyXConfig {
                     enabled: true,

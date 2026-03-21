@@ -55,6 +55,18 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
         }
     }
 
+    // Adapter overlap threshold: high adapter rate suggests short inserts,
+    // lower the min_overlap to catch more short adapter overlaps
+    if let Some(ref adapter) = ingest.quick_scan.dominant_adapter {
+        let rate = ingest.quick_scan.adapter_rates.get(adapter).copied().unwrap_or(0.0);
+        if rate > 0.10 {
+            // >10% adapter contamination -- inserts are short, lower overlap threshold
+            profile.modules.adapter.min_overlap = 6;
+        } else if rate > 0.03 {
+            profile.modules.adapter.min_overlap = 8;
+        }
+    }
+
     // Auto-detect adapter sequences from scan data.
     // If ingestion found a dominant adapter family, override the profile's adapter config.
     if !ingest.quick_scan.detected_adapter_configs.is_empty() {
@@ -81,14 +93,14 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
         profile.modules.complexity.min_entropy = data_driven_threshold;
     }
 
-    // Also set quality min_length based on N-rate: if N-rate is very high,
-    // the N-filter will catch most bad reads, so quality min_length can
-    // be less aggressive
-    if ingest.quick_scan.n_rate > 0.01 {
-        // High N-rate platform -- N-filter is doing heavy lifting
-        // No need for aggressive length filtering too
-        profile.modules.quality.min_mean_quality =
-            profile.modules.quality.min_mean_quality.min(20.0);
+    // Data-driven N-filter threshold: set to 5x the baseline N-rate,
+    // with a floor of 0.05 and ceiling of 0.20. This accommodates
+    // platforms with higher baseline N-rates (NextSeq ~2%) without
+    // removing reads that are normal for the platform.
+    let n_rate = ingest.quick_scan.n_rate;
+    if n_rate > 0.005 {
+        let auto_threshold = (n_rate * 5.0).clamp(0.05, 0.20);
+        profile.modules.quality.max_n_fraction = auto_threshold;
     }
 
     profile

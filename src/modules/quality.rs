@@ -191,6 +191,7 @@ mod tests {
             min_mean_quality: 20.0,
             min_length: 20,
             quality_binned: false,
+            max_n_fraction: 0.10,
         }
     }
 

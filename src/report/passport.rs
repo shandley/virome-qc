@@ -191,19 +191,48 @@ impl Passport {
                         });
                     }
                 }
-                // Future modules will check against their specific thresholds:
-                // "contaminant" → check rRNA fraction against max_rrna_fraction
-                // "host" → check host fraction against max_host_fraction
-                // "dedup" → check duplicate rate against max_duplicate_rate
+                "contaminant" => {
+                    // Check rRNA fraction against threshold
+                    if let Some(rrna) = report.extra.get("rrna_removed") {
+                        if let Some(rrna_count) = rrna.as_u64() {
+                            let rrna_fraction = rrna_count as f64 / result.reads_input as f64;
+                            if rrna_fraction > thresholds.max_rrna_fraction {
+                                flags.push(QcFlag {
+                                    code: "HIGH_RRNA".into(),
+                                    message: format!(
+                                        "{:.1}% rRNA contamination exceeds threshold ({:.1}%)",
+                                        rrna_fraction * 100.0,
+                                        thresholds.max_rrna_fraction * 100.0
+                                    ),
+                                    severity: QualityTier::Warn,
+                                });
+                            }
+                        }
+                    }
+                    // Check PhiX fraction
+                    if let Some(phix) = report.extra.get("phix_removed") {
+                        if let Some(phix_count) = phix.as_u64() {
+                            let phix_fraction = phix_count as f64 / result.reads_input as f64;
+                            if phix_fraction > 0.05 {
+                                flags.push(QcFlag {
+                                    code: "HIGH_PHIX".into(),
+                                    message: format!(
+                                        "{:.2}% PhiX detected",
+                                        phix_fraction * 100.0
+                                    ),
+                                    severity: QualityTier::Warn,
+                                });
+                            }
+                        }
+                    }
+                }
+                // Future: "host" -> check host fraction, "dedup" -> check dup rate
                 _ => {}
             }
         }
 
-        // Check duplicate rate threshold (when dedup module is present)
-        // Placeholder: will be activated in Phase 4
         let _ = thresholds.max_duplicate_rate;
         let _ = thresholds.max_host_fraction;
-        let _ = thresholds.max_rrna_fraction;
     }
 
     /// Write passport as JSON

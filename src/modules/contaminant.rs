@@ -27,6 +27,8 @@ pub struct ContaminantScreener {
     rrna_index: FxHashSet<u64>,
     phix_index: FxHashSet<u64>,
     vector_index: FxHashSet<u64>,
+    /// Per-subunit rRNA indices for detailed breakdown
+    rrna_subunit_indices: Vec<(String, FxHashSet<u64>)>,
     /// Minimum fraction of read k-mers matching to classify as contaminant
     min_kmer_fraction: f64,
     /// Standard stats
@@ -35,6 +37,9 @@ pub struct ContaminantScreener {
     rrna_removed: AtomicU64,
     phix_removed: AtomicU64,
     vector_removed: AtomicU64,
+    /// Per-subunit rRNA counters (prokaryotic vs eukaryotic)
+    rrna_prokaryotic: AtomicU64,
+    rrna_eukaryotic: AtomicU64,
 }
 
 impl ContaminantScreener {
@@ -48,9 +53,14 @@ impl ContaminantScreener {
         let mut phix_idx = FxHashSet::default();
         let mut vector_idx = FxHashSet::default();
 
+        let mut rrna_subunit_indices = Vec::new();
+
         if config.screen_rrna {
-            for (_, seq) in RRNA_REFS {
-                add_sequence_kmers(seq, CONTAMINANT_K, &mut rrna_idx);
+            for (name, seq) in RRNA_REFS {
+                let mut subunit_idx = FxHashSet::default();
+                add_sequence_kmers(seq, CONTAMINANT_K, &mut subunit_idx);
+                rrna_idx.extend(subunit_idx.iter());
+                rrna_subunit_indices.push((name.to_string(), subunit_idx));
             }
             unified.extend(rrna_idx.iter());
         }
@@ -80,11 +90,14 @@ impl ContaminantScreener {
             rrna_index: rrna_idx,
             phix_index: phix_idx,
             vector_index: vector_idx,
+            rrna_subunit_indices,
             min_kmer_fraction: config.min_kmer_fraction,
             stats: AtomicStats::new(),
             rrna_removed: AtomicU64::new(0),
             phix_removed: AtomicU64::new(0),
             vector_removed: AtomicU64::new(0),
+            rrna_prokaryotic: AtomicU64::new(0),
+            rrna_eukaryotic: AtomicU64::new(0),
         }
     }
 
@@ -92,6 +105,7 @@ impl ContaminantScreener {
     ///
     /// Called only when the unified index has enough hits. Does a second pass
     /// against per-category indices to determine which contaminant type.
+    /// For rRNA hits, also determines prokaryotic vs eukaryotic.
     fn classify_contaminant(&self, sequence: &[u8]) -> &'static str {
         if sequence.len() < CONTAMINANT_K {
             return "unknown_contaminant";
@@ -115,6 +129,25 @@ impl ContaminantScreener {
         }
 
         if rrna_hits >= phix_hits && rrna_hits >= vector_hits {
+            // Determine prokaryotic vs eukaryotic by checking subunit indices
+            let mut prok_hits = 0u32;
+            let mut euk_hits = 0u32;
+            for (name, idx) in &self.rrna_subunit_indices {
+                let hits: u32 = sequence
+                    .windows(CONTAMINANT_K)
+                    .filter(|kmer| idx.contains(&hash_kmer(kmer)))
+                    .count() as u32;
+                match name.as_str() {
+                    "16S" | "23S" | "5S" => prok_hits += hits,
+                    "18S" | "28S" | "5.8S" => euk_hits += hits,
+                    _ => {}
+                }
+            }
+            if prok_hits >= euk_hits {
+                self.rrna_prokaryotic.fetch_add(1, Ordering::Relaxed);
+            } else {
+                self.rrna_eukaryotic.fetch_add(1, Ordering::Relaxed);
+            }
             "contaminant_rrna"
         } else if phix_hits >= vector_hits {
             "contaminant_phix"
@@ -166,10 +199,15 @@ impl QcModule for ContaminantScreener {
         let phix = self.phix_removed.load(Ordering::Relaxed);
         let vector = self.vector_removed.load(Ordering::Relaxed);
 
+        let rrna_prok = self.rrna_prokaryotic.load(Ordering::Relaxed);
+        let rrna_euk = self.rrna_eukaryotic.load(Ordering::Relaxed);
+
         self.stats.to_report(
             self.name(),
             serde_json::json!({
                 "rrna_removed": rrna,
+                "rrna_prokaryotic": rrna_prok,
+                "rrna_eukaryotic": rrna_euk,
                 "phix_removed": phix,
                 "vector_removed": vector,
                 "index_size_total": self.unified_index.len(),

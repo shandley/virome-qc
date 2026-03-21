@@ -285,6 +285,22 @@ impl Pipeline {
                     }
                 }
 
+                // Paired-end concordant contaminant flagging:
+                // If one mate is a contaminant, fail the other too (same fragment)
+                fn is_contaminant_fail(ann: &AnnotatedRecord) -> bool {
+                    matches!(
+                        &ann.disposition,
+                        crate::pipeline::Disposition::Fail(reason)
+                            if reason.starts_with("contaminant_")
+                    )
+                }
+                if is_contaminant_fail(&ann_r1) && !ann_r2.is_failed() {
+                    ann_r2.fail("contaminant_mate");
+                }
+                if is_contaminant_fail(&ann_r2) && !ann_r1.is_failed() {
+                    ann_r1.fail("contaminant_mate");
+                }
+
                 (ann_r1, ann_r2)
             })
             .collect();
@@ -510,7 +526,7 @@ impl Pipeline {
         }
 
         // 3. N-filter — remove reads with excessive ambiguous bases
-        modules.push(Box::new(NFilter::new(0.10)));
+        modules.push(Box::new(NFilter::new(cfg.quality.max_n_fraction)));
 
         // 4. Quality trimming + mean quality filter
         if cfg.quality.enabled {
