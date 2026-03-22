@@ -237,11 +237,30 @@ This is genuinely novel -- no existing virome pipeline does SNP-level endogenous
 - `ambiguous.fastq.gz` -- reads that map to host but with viral signal or low confidence
 - Passport: host fraction, ambiguous fraction, EVE region hit distribution
 
-### Performance targets
+### Experiment 3: Full T2T-CHM13 FM-index scalability test
 
-- biometal mapping: ~60K reads/sec at 8 threads (validated on chr22)
-- FM-index memory: 5-7GB for full human genome
-- Index build time: ~3-5 minutes (one-time)
+**Result: FAILED -- OOM killed after 52 minutes**
+
+- Reference: T2T-CHM13 v2.0 (3.117 Gbp)
+- Process killed by OS (exit 137) after 52 min wall time
+- Peak memory: ~5 GB observed, but suffix array construction requires ~25-30 GB intermediate
+- System time: 2142s (35 min!) = severe memory thrashing / swapping
+
+**Root cause**: Biometal's suffix array construction uses O(n * 8) bytes for 64-bit suffix array pointers. For 3.1 Gbp, this is ~25 GB for the SA alone, plus working memory. Exceeds typical workstation RAM.
+
+**Works fine for**: Individual chromosomes (chr22 = 50 MB, builds in 3.3s, 5 GB peak)
+
+### Revised approach options
+
+1. **minimap2 as external dependency** -- proven, builds index in ~8 GB, most virome pipelines use this
+2. **Chromosome-by-chromosome FM-index** -- build per-chromosome, map against each. Complex but pure biometal.
+3. **K-mer containment screening** -- minimizer-subsampled host k-mer set (~500 MB). No suffix array needed. Less precise.
+4. **Optimize biometal SA construction** -- use divsufsort/SA-IS (O(n) space). Biometal improvement.
+
+### Performance targets (revised)
+
+- Mapping approach TBD based on option selection
+- Must work within 8-16 GB RAM on typical workstations
 
 ### Next steps
 
