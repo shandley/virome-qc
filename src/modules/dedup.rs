@@ -260,16 +260,22 @@ pub fn dedup_paired_end(
     })
 }
 
-/// Hash a single-end read by prefix only
+/// Hash a single-end read by a prefix window
 ///
-/// PCR duplicates share the same 5' start position. After adapter/quality
-/// trimming (which removes from the 3' end), the 5' prefix is preserved.
-/// Prefix-only hashing naturally handles contained reads: a 100bp read and
-/// an 80bp read from the same PCR duplicate share the same prefix.
+/// Skips the first 5 bases to tolerate differential 5' quality trimming
+/// and NextSeq position-0 N bases. Then hashes the next prefix_len bases.
+/// PCR duplicates share the same genomic start, so their prefix windows
+/// are identical even if 5' trimming removed 0-5 bases differently.
+///
+/// Prefix-only (no suffix) handles contained reads: a 100bp and 80bp read
+/// from the same PCR duplicate share the same prefix hash.
+const SKIP_BASES: usize = 5;
+
 fn hash_read(sequence: &[u8], prefix_len: usize) -> u64 {
-    let plen = prefix_len.min(sequence.len());
+    let start = SKIP_BASES.min(sequence.len());
+    let end = (start + prefix_len).min(sequence.len());
     let mut hash: u64 = 0xcbf29ce484222325;
-    for &b in &sequence[..plen] {
+    for &b in &sequence[start..end] {
         hash ^= b.to_ascii_uppercase() as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
