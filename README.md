@@ -115,14 +115,16 @@ Custom profiles can be provided as YAML files. See `profiles/stool-vlp-tagmentat
 
 Modules run in this order:
 
-1. **Adapter trimming** -- Removes 3' adapters by overlap detection, scans for internal adapter contamination via k-mer hash index, trims random primer bias from 5' end
-2. **Poly-X trimming** -- Removes homopolymer runs at the 3' end. Platform-aware: uses a shorter detection threshold for poly-G on NovaSeq/NextSeq
-3. **N-base filtering** -- Removes reads with more than 10% ambiguous bases
-4. **Quality trimming** -- Sliding window quality trim from 3' end, leading quality trim from 5' end, mean quality filter
-5. **Complexity filtering** -- Shannon entropy filter with virome-aware thresholds (lower than typical to retain AT-rich phage and cDNA-derived reads)
-6. **Length filtering** -- Removes reads shortened below the minimum length by cumulative trimming
+1. **Adapter trimming** -- Removes 3' adapters by overlap detection (forward + RC for read-through), scans for internal adapter contamination via precomputed k-mer hash index, trims random primer bias from 5' end
+2. **Poly-X trimming** -- Removes homopolymer runs at the 3' end. Platform-aware: aggressive poly-G threshold on 2-color chemistry (NextSeq/NovaSeq), classifies poly-X as likely artifact or likely genomic
+3. **N-base filtering** -- Removes reads with excessive ambiguous bases. Threshold auto-set from ingestion N-rate.
+4. **Quality trimming** -- Sliding window quality trim from 3' end, leading quality trim from 5' end, mean quality filter. Bin-aware mode for NovaSeq/NextSeq quantized Q-scores (auto-detected).
+5. **Complexity filtering** -- Shannon entropy filter with data-driven threshold computed from the 2nd percentile of the sample's complexity distribution during ingestion.
+6. **Contaminant screening** -- k-mer containment against rRNA (16S/23S/5S prokaryotic, 18S/28S/5.8S eukaryotic), PhiX174, and cloning vectors (pUC19). Reports prokaryotic vs eukaryotic rRNA breakdown. Paired-end concordant flagging (if one mate is contaminant, the other is removed too).
+7. **Host depletion** -- Super Bloom k-mer containment screening against a pre-built host genome filter. Three-way classification: host (>50% containment, removed), ambiguous (15-50%, written to separate file), not host (<15%, kept). Requires building a filter first with `virome-qc db`.
+8. **Length filtering** -- Final safety net for reads shortened by cumulative trimming across all modules.
 
-The ordering is intentional. Adapters must be removed first (non-biological sequence). Poly-X runs before quality trimming because NovaSeq poly-G artifacts have high quality scores and would survive Q-score-based trimming. Complexity assessment runs on fully cleaned sequence. Length filtering is last as a safety net.
+The ordering is intentional. Adapters must be removed first (non-biological sequence). Poly-X runs before quality trimming because NovaSeq poly-G artifacts have high quality scores and would survive Q-score-based trimming. Contaminant screening and host depletion run after all read cleaning to prevent adapter/quality artifacts from causing false classifications. Length filtering is last as a safety net.
 
 ## Analytics passport
 
@@ -139,6 +141,30 @@ Every run produces a `passport.json` containing:
 - **Flags**: specific warnings (low survival, high adapter contamination, etc.)
 
 The passport is designed for both human review and programmatic consumption. Downstream tools can parse it to make decisions about sample inclusion or flag batch effects.
+
+## HTML report
+
+Every run also generates an interactive `report.html` dashboard alongside the passport. Self-contained single file with Chart.js charts, Catppuccin theme, and dark mode toggle. Includes per-position quality profiles, base composition, read length distributions, GC content, survival funnel, contaminant breakdown, and adapter analysis. Can also be generated from an existing passport:
+
+```bash
+virome-qc report -i passport.json -o report.html
+```
+
+## Host depletion
+
+Host reads are removed using a Super Bloom k-mer containment filter. Build the filter once from any FASTA reference:
+
+```bash
+# Build filter (~5 min for human genome, 4 GiB output)
+virome-qc db --host T2T-CHM13.fa -o human.sbf
+
+# Use in a profile (set reference to the .sbf file path)
+# host:
+#   enabled: true
+#   reference: /path/to/human.sbf
+```
+
+The filter uses the Super Bloom data structure (near-zero false positives via findere consistency scheme). Reads are classified by k-mer containment fraction: host (>50%, removed), ambiguous (15-50%, written to `ambiguous_*.fastq.gz`), not host (<15%, kept).
 
 ## Test corpus generator
 
@@ -174,14 +200,24 @@ Benchmarked on Apple Silicon (M3 Max) with 1M reads (150bp):
 
 All QC modules enabled including internal adapter k-mer scan, per-position analytics, and HyperLogLog library complexity estimation.
 
+## Ingestion engine
+
+Before QC runs, virome-qc scans the first 50,000 reads to auto-detect platform characteristics and configure the pipeline:
+
+- **Platform detection**: Illumina (MiSeq, NextSeq, NovaSeq, HiSeq, iSeq), BGI/MGI, PacBio, ONT, Element AVITI. Handles ENA-reformatted and SRA-stripped headers.
+- **Adapter auto-detection**: Identifies Nextera vs TruSeq/NEBNext from read content. Overrides profile if mismatch detected.
+- **Data-driven parameters**: Complexity threshold from sample distribution, quality window from read length, min read length from actual reads, poly-G behavior from detected chemistry, N-filter threshold from baseline N-rate.
+- **Q-score binning detection**: Automatically enables bin-aware quality trimming for NovaSeq/NextSeq.
+
+No user configuration needed -- the ingestion engine adjusts profile parameters based on the data.
+
 ## Development status
 
-Phase 1 is complete. Planned additions:
+Phases 1-3 are complete. Planned additions:
 
-- **Phase 2**: Contaminant screening (rRNA, PhiX, vectors, kitome) via unified k-mer index
-- **Phase 3**: Host depletion with EVE-aware masking and viral read rescue
 - **Phase 4**: Duplicate detection (optical + PCR) with UMI support
-- **Phase 5**: Interactive HTML report generation from passport data
+- **Phase 3b**: SNP-level endogenous vs exogenous retrovirus discrimination on ambiguous host reads
+- **EVE annotation**: Flagging reads that map to known endogenous viral element regions
 
 ## License
 

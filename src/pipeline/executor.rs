@@ -59,6 +59,7 @@ struct PairedContext<'a> {
     writer_r1: &'a std::sync::Mutex<FastqWriter>,
     writer_r2: &'a std::sync::Mutex<FastqWriter>,
     writer_singletons: &'a std::sync::Mutex<FastqWriter>,
+    writer_ambiguous: &'a std::sync::Mutex<FastqWriter>,
     writer_merged: Option<&'a std::sync::Mutex<FastqWriter>>,
     reads_input: &'a AtomicU64,
     reads_passed: &'a AtomicU64,
@@ -163,6 +164,8 @@ impl Pipeline {
             std::sync::Mutex::new(FastqWriter::create(output_dir.join("clean_R2.fastq.gz"))?);
         let writer_singletons =
             std::sync::Mutex::new(FastqWriter::create(output_dir.join("singletons.fastq.gz"))?);
+        let writer_ambiguous =
+            std::sync::Mutex::new(FastqWriter::create(output_dir.join("ambiguous.fastq.gz"))?);
         let writer_merged = if merge {
             Some(std::sync::Mutex::new(FastqWriter::create(
                 output_dir.join("merged.fastq.gz"),
@@ -186,6 +189,7 @@ impl Pipeline {
             writer_r1: &writer_r1,
             writer_r2: &writer_r2,
             writer_singletons: &writer_singletons,
+            writer_ambiguous: &writer_ambiguous,
             writer_merged: writer_merged.as_ref(),
             reads_input: &reads_input,
             reads_passed: &reads_passed,
@@ -321,7 +325,18 @@ impl Pipeline {
             let r1_pass = !ann_r1.is_failed();
             let r2_pass = !ann_r2.is_failed();
 
+            // Route flagged (ambiguous) reads to separate file
+            let either_flagged = ann_r1.is_flagged() || ann_r2.is_flagged();
+
             match (r1_pass, r2_pass) {
+                (true, true) if either_flagged => {
+                    // Both passed but at least one flagged -- write to ambiguous
+                    let mut w_amb = ctx.writer_ambiguous.lock().unwrap();
+                    w_amb.write_record(&ann_r1.record)?;
+                    w_amb.write_record(&ann_r2.record)?;
+                    ctx.reads_passed.fetch_add(2, Ordering::Relaxed);
+                    ctx.pairs_passed.fetch_add(1, Ordering::Relaxed);
+                }
                 (true, true) => {
                     if let Some(m) = ctx.merger {
                         match m.merge_pair(&ann_r1.record, &ann_r2.record) {

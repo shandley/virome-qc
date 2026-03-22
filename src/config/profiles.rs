@@ -129,7 +129,7 @@ fn default_host_threshold() -> f64 {
     0.50
 }
 fn default_ambiguous_threshold() -> f64 {
-    0.15
+    0.20
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -312,15 +312,15 @@ impl Profile {
                     min_kmer_fraction: 0.4,
                 },
                 host: HostConfig {
-                    enabled: true,
+                    enabled: false,
                     reference: "human".into(),
                     host_threshold: 0.50,
-                    ambiguous_threshold: 0.15,
+                    ambiguous_threshold: 0.20,
                     eve_aware: true,
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: true,
+                    enabled: false,
                     optical_distance: 2500,
                     umi_aware: false,
                 },
@@ -376,15 +376,15 @@ impl Profile {
                     min_kmer_fraction: 0.4,
                 },
                 host: HostConfig {
-                    enabled: true,
+                    enabled: false,
                     reference: "human".into(),
                     host_threshold: 0.50,
-                    ambiguous_threshold: 0.15,
+                    ambiguous_threshold: 0.20,
                     eve_aware: true,
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: true,
+                    enabled: false,
                     optical_distance: 2500,
                     umi_aware: false,
                 },
@@ -440,15 +440,15 @@ impl Profile {
                     min_kmer_fraction: 0.4,
                 },
                 host: HostConfig {
-                    enabled: true,
+                    enabled: false,
                     reference: "human".into(),
                     host_threshold: 0.50,
-                    ambiguous_threshold: 0.15,
+                    ambiguous_threshold: 0.20,
                     eve_aware: true,
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: true,
+                    enabled: false,
                     optical_distance: 2500,
                     umi_aware: false,
                 },
@@ -504,15 +504,15 @@ impl Profile {
                     min_kmer_fraction: 0.4,
                 },
                 host: HostConfig {
-                    enabled: true,
+                    enabled: false,
                     reference: "human".into(),
                     host_threshold: 0.50,
-                    ambiguous_threshold: 0.15,
+                    ambiguous_threshold: 0.20,
                     eve_aware: true,
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: true,
+                    enabled: false,
                     optical_distance: 2500,
                     umi_aware: false,
                 },
