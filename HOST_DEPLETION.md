@@ -277,3 +277,35 @@ This is genuinely novel -- no existing virome pipeline does SNP-level endogenous
 **Goal**: Evaluate whether k-mer containment screening (like our contaminant module) can replace full mapping for host identification, trading precision for speed and memory.
 
 **Status**: Planned
+
+### Experiment 4: Full T2T-CHM13 Super Bloom build and query
+
+**Result: SUCCESS**
+
+| Metric | Value |
+|---|---|
+| Reference | T2T-CHM13 v2.0, 3.12 Gbp, 25 chromosomes |
+| K-mers indexed | 3,117,291,320 |
+| Build time | 5.2 minutes |
+| Filter size | 4 GiB |
+| Query speed | 84K reads/sec |
+| Memory | ~4.5 GB peak (fits on any modern workstation) |
+
+Classification on Buddle WGS data (10K reads, CpG-depleted):
+- Host (>70% containment): 2,413 (24.1%)
+- Ambiguous (20-70%): 3,144 (31.4%)
+- Not host (<20%): 4,443 (44.4%)
+- Mean k-mer containment: 0.374
+
+The high ambiguous fraction (31.4%) suggests threshold tuning is needed.
+The 20% lower bound may be too low -- many reads with low host homology
+(repetitive elements, shared domains) land in this bin. Raising the lower
+threshold to 30-40% or using the dual-scoring (host + viral k-mers)
+approach would resolve most ambiguous reads.
+
+**Comparison with FM-index attempt:**
+- FM-index: OOM killed after 52 min (suffix array too large)
+- Super Bloom: completed in 5.2 min, 4 GB memory
+- Super Bloom is the viable approach for full genome host depletion
+
+**Next: implement the host depletion module using Super Bloom.**
