@@ -111,12 +111,25 @@ pub struct ContaminantConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostConfig {
     pub enabled: bool,
-    /// Host reference name (e.g., "human", "mouse") or path to FASTA
+    /// Path to Super Bloom filter file (.sbf), or host reference name for auto-download
     pub reference: String,
+    /// Minimum k-mer containment fraction to classify as host (default 0.50)
+    #[serde(default = "default_host_threshold")]
+    pub host_threshold: f64,
+    /// Minimum k-mer containment fraction to flag as ambiguous (default 0.15)
+    #[serde(default = "default_ambiguous_threshold")]
+    pub ambiguous_threshold: f64,
     /// Use EVE-masked reference to avoid scrubbing viral sequences
     pub eve_aware: bool,
     /// Rescue reads that hit EVE regions by re-checking against viral DB
     pub rescue: bool,
+}
+
+fn default_host_threshold() -> f64 {
+    0.50
+}
+fn default_ambiguous_threshold() -> f64 {
+    0.15
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -301,6 +314,8 @@ impl Profile {
                 host: HostConfig {
                     enabled: true,
                     reference: "human".into(),
+                    host_threshold: 0.50,
+                    ambiguous_threshold: 0.15,
                     eve_aware: true,
                     rescue: true,
                 },
@@ -363,6 +378,8 @@ impl Profile {
                 host: HostConfig {
                     enabled: true,
                     reference: "human".into(),
+                    host_threshold: 0.50,
+                    ambiguous_threshold: 0.15,
                     eve_aware: true,
                     rescue: true,
                 },
@@ -425,6 +442,8 @@ impl Profile {
                 host: HostConfig {
                     enabled: true,
                     reference: "human".into(),
+                    host_threshold: 0.50,
+                    ambiguous_threshold: 0.15,
                     eve_aware: true,
                     rescue: true,
                 },
@@ -487,6 +506,8 @@ impl Profile {
                 host: HostConfig {
                     enabled: true,
                     reference: "human".into(),
+                    host_threshold: 0.50,
+                    ambiguous_threshold: 0.15,
                     eve_aware: true,
                     rescue: true,
                 },

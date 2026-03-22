@@ -89,6 +89,17 @@ enum Commands {
         json: bool,
     },
 
+    /// Build database files (host filter, etc.)
+    Db {
+        /// Build a host Super Bloom filter from a FASTA reference
+        #[arg(long)]
+        host: Option<PathBuf>,
+
+        /// Output path for the filter file
+        #[arg(short, long, default_value = "host.sbf")]
+        output: PathBuf,
+    },
+
     /// Generate report from existing passport files
     Report {
         /// Input directory containing passport JSON files
@@ -318,6 +329,23 @@ fn main() -> Result<()> {
                         println!("  {w}");
                     }
                 }
+            }
+        }
+        Commands::Db { host, output } => {
+            if let Some(fasta_path) = host {
+                println!(
+                    "Building host Super Bloom filter from: {}",
+                    fasta_path.display()
+                );
+                let start = std::time::Instant::now();
+                virome_qc::modules::host::HostFilter::build_filter(&fasta_path, &output)?;
+                println!(
+                    "Done in {:.1}s. Filter: {}",
+                    start.elapsed().as_secs_f64(),
+                    output.display()
+                );
+            } else {
+                eprintln!("Specify --host <reference.fa> to build a host filter");
             }
         }
         Commands::Report { input, output } => {

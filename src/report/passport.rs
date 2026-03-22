@@ -222,7 +222,21 @@ impl Passport {
                         }
                     }
                 }
-                // Future: "host" -> check host fraction, "dedup" -> check dup rate
+                "host" => {
+                    let host_fraction = report.reads_removed as f64 / result.reads_input as f64;
+                    if host_fraction > thresholds.max_host_fraction {
+                        flags.push(QcFlag {
+                            code: "HIGH_HOST".into(),
+                            message: format!(
+                                "{:.1}% host reads exceeds threshold ({:.1}%)",
+                                host_fraction * 100.0,
+                                thresholds.max_host_fraction * 100.0
+                            ),
+                            severity: QualityTier::Warn,
+                        });
+                    }
+                }
+                // Future: "dedup" -> check dup rate
                 _ => {}
             }
         }

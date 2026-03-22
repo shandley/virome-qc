@@ -6,9 +6,9 @@
 
 use crate::config::{ProfileConfig, Thresholds};
 use crate::modules::{
-    AdapterTrimmer, AnalyticsSnapshot, ComplexityFilter, ContaminantScreener, LengthFilter,
-    MergeConfig, MergeResult, ModuleReport, NFilter, PolyXTrimmer, QcModule, QualityTrimmer,
-    ReadAnalytics, ReadMerger,
+    AdapterTrimmer, AnalyticsSnapshot, ComplexityFilter, ContaminantScreener, HostFilter,
+    LengthFilter, MergeConfig, MergeResult, ModuleReport, NFilter, PolyXTrimmer, QcModule,
+    QualityTrimmer, ReadAnalytics, ReadMerger,
 };
 use crate::pipeline::record::AnnotatedRecord;
 use crate::report::Passport;
@@ -524,10 +524,10 @@ impl Pipeline {
     /// 4. Quality trim — trim low-quality tails and filter by mean quality
     /// 5. Complexity filter — assess cleaned sequence entropy
     /// 6. Contaminant screening — rRNA, PhiX, vectors (k-mer index)
-    /// 7. Length filter — final catch for reads shortened by cumulative trimming
+    /// 7. Host depletion — Super Bloom k-mer containment (if filter available)
+    /// 8. Length filter — final catch for reads shortened by cumulative trimming
     ///
     /// Future phases:
-    /// 8. Host depletion (Phase 3)
     /// 9. Deduplication (Phase 4)
     fn build_modules(&self) -> Result<Vec<Box<dyn QcModule + Send + Sync>>> {
         let mut modules: Vec<Box<dyn QcModule + Send + Sync>> = Vec::new();
@@ -561,7 +561,18 @@ impl Pipeline {
             modules.push(Box::new(ContaminantScreener::new(&cfg.contaminant)));
         }
 
-        // 7. Final length filter — catch reads shortened by cumulative trimming
+        // 7. Host depletion — Super Bloom k-mer containment (Phase 3)
+        if cfg.host.enabled {
+            match HostFilter::from_filter_file(&cfg.host) {
+                Ok(filter) => modules.push(Box::new(filter)),
+                Err(e) => {
+                    log::warn!("Host depletion disabled: {}", e);
+                    eprintln!("  Warning: Host filter not available: {}", e);
+                }
+            }
+        }
+
+        // 8. Final length filter — catch reads shortened by cumulative trimming
         if cfg.quality.enabled {
             modules.push(Box::new(LengthFilter::new(cfg.quality.min_length)));
         }
