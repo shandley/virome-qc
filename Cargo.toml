@@ -11,6 +11,10 @@ rust-version = "1.75"
 # Core bioinformatics primitives
 biometal = { path = "/Users/scotthandley/Code/tools/biometal", default-features = false, features = [] }
 
+# Host depletion: Super Bloom filter for k-mer containment screening
+# Local patched copy with needletail made optional to avoid lzma-sys conflict
+superbloom = { path = "/Users/scotthandley/Code/tools/SuperBloom", default-features = false }
+
 # Parallelism
 rayon = "1.8"
 
