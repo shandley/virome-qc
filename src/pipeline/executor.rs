@@ -279,20 +279,20 @@ impl Pipeline {
                     }
                 }
 
-                // Paired-end concordant contaminant flagging:
-                // If one mate is a contaminant, fail the other too (same fragment)
-                fn is_contaminant_fail(ann: &AnnotatedRecord) -> bool {
+                // Paired-end concordant flagging:
+                // If one mate is contaminant or host, fail the other (same fragment)
+                fn is_concordant_fail(ann: &AnnotatedRecord) -> bool {
                     matches!(
                         &ann.disposition,
                         crate::pipeline::Disposition::Fail(reason)
-                            if reason.starts_with("contaminant_")
+                            if reason.starts_with("contaminant_") || reason == "host"
                     )
                 }
-                if is_contaminant_fail(&ann_r1) && !ann_r2.is_failed() {
-                    ann_r2.fail("contaminant_mate");
+                if is_concordant_fail(&ann_r1) && !ann_r2.is_failed() {
+                    ann_r2.fail("concordant_mate");
                 }
-                if is_contaminant_fail(&ann_r2) && !ann_r1.is_failed() {
-                    ann_r1.fail("contaminant_mate");
+                if is_concordant_fail(&ann_r2) && !ann_r1.is_failed() {
+                    ann_r1.fail("concordant_mate");
                 }
 
                 (ann_r1, ann_r2)
@@ -418,6 +418,17 @@ impl Pipeline {
         let writer = FastqWriter::create(output)?;
         let writer = std::sync::Mutex::new(writer);
 
+        // Ambiguous reads writer (host_ambiguous flagged reads)
+        let ambiguous_path = output.with_file_name(
+            output
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .replace("clean_", "ambiguous_"),
+        );
+        let ambiguous_writer = FastqWriter::create(&ambiguous_path)?;
+        let ambiguous_writer = std::sync::Mutex::new(ambiguous_writer);
+
         let mut reads_input = 0u64;
         let mut reads_passed = 0u64;
         let mut reads_failed = 0u64;
@@ -432,7 +443,7 @@ impl Pipeline {
 
             if block.len() >= block_size {
                 let (input, passed, failed) =
-                    self.process_single_block(&block, modules, &writer, qa)?;
+                    self.process_single_block(&block, modules, &writer, &ambiguous_writer, qa)?;
                 reads_input += input;
                 reads_passed += passed;
                 reads_failed += failed;
@@ -447,7 +458,7 @@ impl Pipeline {
 
         if !block.is_empty() {
             let (input, passed, failed) =
-                self.process_single_block(&block, modules, &writer, qa)?;
+                self.process_single_block(&block, modules, &writer, &ambiguous_writer, qa)?;
             reads_input += input;
             reads_passed += passed;
             reads_failed += failed;
@@ -465,6 +476,7 @@ impl Pipeline {
         block: &[biometal::FastqRecord],
         modules: &[Box<dyn QcModule + Send + Sync>],
         writer: &std::sync::Mutex<FastqWriter>,
+        ambiguous_writer: &std::sync::Mutex<FastqWriter>,
         qa: &ReadAnalytics,
     ) -> Result<(u64, u64, u64)> {
         // Record pre-QC stats
@@ -491,10 +503,20 @@ impl Pipeline {
         let mut failed = 0u64;
 
         let mut writer = writer.lock().unwrap();
+        let mut amb_writer = ambiguous_writer.lock().unwrap();
         for annotated in &results {
             if annotated.is_failed() {
                 failed += 1;
                 qa.record_failed();
+            } else if annotated.is_flagged() {
+                // Flagged (ambiguous) reads go to separate file but count as passed
+                passed += 1;
+                qa.record_passed(
+                    &annotated.record.sequence,
+                    &annotated.record.quality,
+                    annotated.total_trimmed(),
+                );
+                amb_writer.write_record(&annotated.record)?;
             } else {
                 passed += 1;
                 qa.record_passed(

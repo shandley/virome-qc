@@ -63,6 +63,11 @@ impl AnnotatedRecord {
         matches!(self.disposition, Disposition::Fail(_))
     }
 
+    /// Check if the read has been flagged (ambiguous)
+    pub fn is_flagged(&self) -> bool {
+        matches!(self.disposition, Disposition::Flag(_))
+    }
+
     /// Current sequence length
     pub fn len(&self) -> usize {
         self.record.sequence.len()

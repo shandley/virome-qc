@@ -58,19 +58,46 @@ impl HostFilter {
 
     /// Build a Super Bloom filter from a FASTA reference and save to disk
     ///
-    /// This is called by `virome-qc db build`, not during normal pipeline runs.
+    /// Auto-sizes the filter based on reference size:
+    /// - <100 Mbp: 128 MiB (exponent 30)
+    /// - <500 Mbp: 512 MiB (exponent 32)
+    /// - <2 Gbp: 2 GiB (exponent 34)
+    /// - >=2 Gbp: 4 GiB (exponent 35)
+    ///
+    /// Target: ~11 bits per k-mer for good accuracy with 8 hash functions.
     pub fn build_filter(fasta_path: &Path, output_path: &Path) -> Result<(), anyhow::Error> {
+        // Estimate reference size to auto-size filter
+        let file_size = std::fs::metadata(fasta_path)?.len();
+        // FASTA overhead ~2% (headers + newlines), rough estimate of sequence bp
+        let est_bp = (file_size as f64 * 0.98) as u64;
+
+        let exponent = if est_bp < 100_000_000 {
+            30 // 128 MiB
+        } else if est_bp < 500_000_000 {
+            32 // 512 MiB
+        } else if est_bp < 2_000_000_000 {
+            34 // 2 GiB
+        } else {
+            35 // 4 GiB
+        };
+
+        let filter_size_mb = (1u64 << exponent) / 8 / 1024 / 1024;
+
         let config = SuperBloomConfig {
             k: 31,
             m: 21,
             s: 27,
             n_hashes: 8,
-            bit_vector_size_exponent: 35, // 4 GiB
+            bit_vector_size_exponent: exponent,
             block_size_exponent: 9,
             minimizer_mode: MinimizerMode::Simd,
         };
 
-        eprintln!("Building Super Bloom host filter (4 GiB, k=31)...");
+        eprintln!(
+            "Building Super Bloom host filter ({} MiB, k=31, est. {} Mbp reference)...",
+            filter_size_mb,
+            est_bp / 1_000_000
+        );
         let mut sb = SuperBloom::new(config)
             .map_err(|e| anyhow::anyhow!("Failed to create SuperBloom: {}", e))?;
 
