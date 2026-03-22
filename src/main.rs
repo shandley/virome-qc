@@ -112,6 +112,17 @@ enum Commands {
         umi: bool,
     },
 
+    /// Generate multi-sample batch comparison report
+    Batch {
+        /// Directory containing sample result directories (each with passport.json)
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Output HTML report path
+        #[arg(short, long, default_value = "batch_report.html")]
+        output: PathBuf,
+    },
+
     /// Build database files (host filter, etc.)
     Db {
         /// Build a host Super Bloom filter from a FASTA reference
@@ -353,6 +364,10 @@ fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Commands::Batch { input, output } => {
+            virome_qc::report::batch::generate_batch_report(&input, &output)?;
+            println!("Batch report written to: {}", output.display());
         }
         Commands::Dedup {
             input,

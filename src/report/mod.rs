@@ -1,5 +1,6 @@
 //! QA Passport generation — structured per-sample QC report + HTML dashboard
 
+pub mod batch;
 pub mod html;
 pub mod passport;
 
