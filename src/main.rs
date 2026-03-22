@@ -400,7 +400,42 @@ fn main() -> Result<()> {
             println!("\nStats written to: {}", stats_path.display());
         }
         Commands::Db { host, output } => {
-            if let Some(fasta_path) = host {
+            if let Some(ref host_arg) = host {
+                let fasta_path = if host_arg.exists() {
+                    // Direct file path
+                    host_arg.clone()
+                } else {
+                    // Name-based: auto-download known references
+                    let name = host_arg.to_string_lossy().to_lowercase();
+                    let url = match name.as_str() {
+                        "human" | "t2t" | "chm13" => {
+                            "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz"
+                        }
+                        other => {
+                            anyhow::bail!(
+                                "Unknown reference '{}'. Provide a FASTA file path, or use 'human' for T2T-CHM13.",
+                                other
+                            );
+                        }
+                    };
+                    let download_path = output.with_extension("fa.gz");
+                    println!("Downloading {} reference...", name);
+                    let status = std::process::Command::new("curl")
+                        .args(["-L", "-o", &download_path.to_string_lossy(), url])
+                        .status()?;
+                    if !status.success() {
+                        anyhow::bail!("Download failed");
+                    }
+                    println!("Decompressing...");
+                    let status = std::process::Command::new("gunzip")
+                        .args(["-f", &download_path.to_string_lossy()])
+                        .status()?;
+                    if !status.success() {
+                        anyhow::bail!("Decompression failed");
+                    }
+                    download_path.with_extension("") // remove .gz
+                };
+
                 println!(
                     "Building host Super Bloom filter from: {}",
                     fasta_path.display()
@@ -413,7 +448,7 @@ fn main() -> Result<()> {
                     output.display()
                 );
             } else {
-                eprintln!("Specify --host <reference.fa> to build a host filter");
+                eprintln!("Specify --host <reference.fa> or --host human to build a host filter");
             }
         }
         Commands::Report { input, output } => {
