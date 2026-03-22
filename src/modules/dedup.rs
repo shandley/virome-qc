@@ -55,9 +55,11 @@ struct ReadCoords {
 
 /// Entry in the dedup hash table
 struct DupGroup {
-    /// Index of the representative read (highest quality)
+    /// Index of the representative read (longest, then highest quality)
     representative: usize,
-    /// Best mean quality seen
+    /// Best length seen (prefer longer reads -- they retained more sequence)
+    best_length: usize,
+    /// Best mean quality seen (tiebreaker when lengths are equal)
     best_quality: f64,
     /// Count of reads in this group
     count: u32,
@@ -95,8 +97,10 @@ pub fn dedup_single_end(input: &Path, output: &Path, config: &DedupConfig) -> Re
             hash
         };
 
+        let read_len = record.sequence.len();
         let group = groups.entry(group_key).or_insert(DupGroup {
             representative: idx,
+            best_length: read_len,
             best_quality: mean_q,
             count: 0,
             coords,
@@ -104,8 +108,12 @@ pub fn dedup_single_end(input: &Path, output: &Path, config: &DedupConfig) -> Re
         });
         group.count += 1;
 
-        if mean_q > group.best_quality {
+        // Prefer longer reads (more sequence retained), then higher quality
+        if read_len > group.best_length
+            || (read_len == group.best_length && mean_q > group.best_quality)
+        {
             group.representative = idx;
+            group.best_length = read_len;
             group.best_quality = mean_q;
         }
 
@@ -190,8 +198,10 @@ pub fn dedup_paired_end(
             hash
         };
 
+        let pair_len = rec1.sequence.len() + rec2.sequence.len();
         let group = groups.entry(group_key).or_insert(DupGroup {
             representative: idx,
+            best_length: pair_len,
             best_quality: mean_q,
             count: 0,
             coords,
@@ -199,8 +209,11 @@ pub fn dedup_paired_end(
         });
         group.count += 1;
 
-        if mean_q > group.best_quality {
+        if pair_len > group.best_length
+            || (pair_len == group.best_length && mean_q > group.best_quality)
+        {
             group.representative = idx;
+            group.best_length = pair_len;
             group.best_quality = mean_q;
         }
 
@@ -247,19 +260,16 @@ pub fn dedup_paired_end(
     })
 }
 
-/// Hash a single-end read by prefix + suffix
+/// Hash a single-end read by prefix only
+///
+/// PCR duplicates share the same 5' start position. After adapter/quality
+/// trimming (which removes from the 3' end), the 5' prefix is preserved.
+/// Prefix-only hashing naturally handles contained reads: a 100bp read and
+/// an 80bp read from the same PCR duplicate share the same prefix.
 fn hash_read(sequence: &[u8], prefix_len: usize) -> u64 {
     let plen = prefix_len.min(sequence.len());
-    let slen = prefix_len.min(sequence.len());
     let mut hash: u64 = 0xcbf29ce484222325;
-    // Hash prefix
     for &b in &sequence[..plen] {
-        hash ^= b.to_ascii_uppercase() as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    // Hash suffix
-    let start = sequence.len().saturating_sub(slen);
-    for &b in &sequence[start..] {
         hash ^= b.to_ascii_uppercase() as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
