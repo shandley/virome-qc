@@ -155,3 +155,38 @@ Running record of real-data validation results. Each dataset tests different asp
 4. **TruSeq and NEBNext are indistinguishable by sequence.** Both use the identical adapter core. Merged into a single "TruSeq/NEBNext" family for auto-detection. Functionally interchangeable for trimming.
 
 5. **Need to test on a sample WITHOUT host depletion** to validate human marker sensitivity. The Buddle WGS samples all use CpG depletion, so human DNA is intentionally removed before sequencing.
+
+---
+
+### 4. Full 9-module pipeline validation (all modules enabled)
+
+**Date**: 2026-03-21
+
+Both datasets tested with complete pipeline: adapter + polyx + n_filter + quality + complexity + dedup + contaminant + length_filter. Host depletion not included (no filter built for these tests).
+
+**Cook (ERR10359658, MiSeq 2x250, Nextera XT, 15 phages, MDA-amplified):**
+
+| Module | Removed | % |
+|--------|---------|---|
+| Adapter (internal) | 214 | 0.01% |
+| N-filter | 2,440 | 0.10% |
+| Quality | 202,872 | 8.00% |
+| Complexity | 15 | 0.00% |
+| Dedup | 1,336,615 | 52.68% |
+| Contaminant (rRNA) | 1,298 | 0.05% |
+| Contaminant (PhiX) | 6 | 0.00% |
+
+Survival: 24.9% (631,750 / 2,537,368). Low survival driven by MDA duplication (52.7%). Library complexity ~995K unique sequences. Quality tier: PASS.
+
+**Kleiner (ERR1877475, NextSeq 500 2x75, NEBNext, 32 species):**
+
+| Module | Removed | % |
+|--------|---------|---|
+| N-filter | 753,662 | 2.06% |
+| Quality | 442,124 | 1.21% |
+| Complexity | 473,270 | 1.29% |
+| Dedup | 4,642,572 | 12.67% |
+| Contaminant (rRNA) | 10,273 | 0.03% |
+| Contaminant (PhiX) | 1,360 | 0.00% |
+
+Survival: 73.8% (27,054,772 / 36,652,900). Quality tier: WARN (approaching survival threshold). rRNA correctly classified: 10,228 prokaryotic, 45 eukaryotic. PhiX correctly detected (PhiX174 is in the mock).
