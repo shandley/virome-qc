@@ -190,3 +190,26 @@ Survival: 24.9% (631,750 / 2,537,368). Low survival driven by MDA duplication (5
 | Contaminant (PhiX) | 1,360 | 0.00% |
 
 Survival: 73.8% (27,054,772 / 36,652,900). Quality tier: WARN (approaching survival threshold). rRNA correctly classified: 10,228 prokaryotic, 45 eukaryotic. PhiX correctly detected (PhiX174 is in the mock).
+
+---
+
+### 5. Module comparison: Super Bloom vs minimap2 for host depletion
+
+**Dataset**: Buddle WGS (ERR13480651), 10K reads, chr22 reference
+
+| Classification | minimap2 | Super Bloom | Notes |
+|---|---|---|---|
+| **High-confidence host** | 120 (MAPQ>=30) | 132 (>50% containment) | **Agreement within 10%** |
+| Low-confidence/ambiguous | 1,296 (MAPQ<30) | 521 (15-50%) | Super Bloom more conservative |
+| Not flagged | 8,681 | 9,347 | |
+| Total flagged | 1,416 | 653 | |
+
+**minimap2 MAPQ distribution of mapped reads:**
+- MAPQ 0: 314 (22%) -- no confidence
+- MAPQ 1-9: 802 (57%) -- very low confidence
+- MAPQ 10-29: 180 (13%) -- moderate
+- MAPQ 30+: 120 (8%) -- high confidence
+
+**Key finding**: At the high-confidence level, both tools agree closely (120 vs 132 confident host reads). The difference (1,416 vs 653 total flagged) is driven by minimap2 reporting 1,116 MAPQ <10 mappings that Super Bloom correctly does not flag as host. These are repetitive, multimapping, or marginal alignments that would be filtered out by any quality threshold.
+
+Super Bloom's conservative approach is better for virome QC: it removes confident host reads without the noise of low-quality mappings that inflate the "host" count.
