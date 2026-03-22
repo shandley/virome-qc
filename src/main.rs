@@ -89,6 +89,29 @@ enum Commands {
         json: bool,
     },
 
+    /// Deduplicate clean FASTQ files (post-pipeline step)
+    Dedup {
+        /// Input FASTQ file (single-end) or R1 (paired-end)
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// R2 input for paired-end dedup
+        #[arg(short = '2', long)]
+        r2: Option<PathBuf>,
+
+        /// Output directory
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Optical duplicate pixel distance (100 non-patterned, 2500 patterned)
+        #[arg(long, default_value = "2500")]
+        optical_distance: u32,
+
+        /// Enable UMI-aware dedup (extracts UMI from read names)
+        #[arg(long)]
+        umi: bool,
+    },
+
     /// Build database files (host filter, etc.)
     Db {
         /// Build a host Super Bloom filter from a FASTA reference
@@ -330,6 +353,51 @@ fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Commands::Dedup {
+            input,
+            r2,
+            output,
+            optical_distance,
+            umi,
+        } => {
+            std::fs::create_dir_all(&output)?;
+            let config = virome_qc::modules::dedup::DedupConfig {
+                optical_distance,
+                umi_aware: umi,
+                prefix_len: 50,
+            };
+
+            let stats = if let Some(r2_path) = r2 {
+                // Paired-end dedup
+                let r1_out = output.join("dedup_R1.fastq.gz");
+                let r2_out = output.join("dedup_R2.fastq.gz");
+                println!("Deduplicating paired-end reads...");
+                virome_qc::modules::dedup::dedup_paired_end(
+                    &input, &r2_path, &r1_out, &r2_out, &config,
+                )?
+            } else {
+                // Single-end dedup
+                let se_out = output.join("dedup.fastq.gz");
+                println!("Deduplicating single-end reads...");
+                virome_qc::modules::dedup::dedup_single_end(&input, &se_out, &config)?
+            };
+
+            println!("\n=== Dedup Results ===");
+            println!("Total reads:   {:>12}", stats.total_reads);
+            println!("Unique reads:  {:>12}", stats.unique_reads);
+            println!("PCR duplicates:{:>12}", stats.pcr_duplicates);
+            println!("Duplicate rate:{:>11.1}%", stats.duplicate_rate * 100.0);
+            println!(
+                "Library complexity: ~{}",
+                stats.estimated_library_complexity
+            );
+
+            // Save stats as JSON
+            let stats_path = output.join("dedup_stats.json");
+            let stats_json = serde_json::to_string_pretty(&stats)?;
+            std::fs::write(&stats_path, stats_json)?;
+            println!("\nStats written to: {}", stats_path.display());
         }
         Commands::Db { host, output } => {
             if let Some(fasta_path) = host {

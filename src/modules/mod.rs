@@ -4,6 +4,7 @@ mod adapter;
 mod complexity;
 mod contaminant;
 mod contaminant_refs;
+pub mod dedup;
 pub mod host;
 mod length;
 pub mod merge;
