@@ -8,7 +8,7 @@ use crate::config::{ProfileConfig, Thresholds};
 use crate::modules::{
     AdapterTrimmer, AnalyticsSnapshot, ComplexityFilter, ContaminantScreener, HostFilter,
     LengthFilter, MergeConfig, MergeResult, ModuleReport, NFilter, PolyXTrimmer, QcModule,
-    QualityTrimmer, ReadAnalytics, ReadMerger,
+    QualityTrimmer, ReadAnalytics, ReadMerger, StreamingDedup,
 };
 use crate::pipeline::record::AnnotatedRecord;
 use crate::report::Passport;
@@ -333,7 +333,7 @@ impl Pipeline {
                     matches!(
                         &ann.disposition,
                         crate::pipeline::Disposition::Fail(reason)
-                            if reason.starts_with("contaminant_") || reason == "host"
+                            if reason.starts_with("contaminant_") || reason == "host" || reason == "pcr_duplicate"
                     )
                 }
                 if is_concordant_fail(&ann_r1) && !ann_r2.is_failed() {
@@ -612,12 +612,10 @@ impl Pipeline {
     /// 3. N-filter — remove reads with excessive ambiguous bases
     /// 4. Quality trim — trim low-quality tails and filter by mean quality
     /// 5. Complexity filter — assess cleaned sequence entropy
-    /// 6. Contaminant screening — rRNA, PhiX, vectors (k-mer index)
-    /// 7. Host depletion — Super Bloom k-mer containment (if filter available)
-    /// 8. Length filter — final catch for reads shortened by cumulative trimming
-    ///
-    /// Future phases:
-    /// 9. Deduplication (Phase 4)
+    /// 6. Streaming dedup — remove PCR duplicates (saves compute on downstream steps)
+    /// 7. Contaminant screening — rRNA, PhiX, vectors (k-mer index)
+    /// 8. Host depletion — Super Bloom k-mer containment (if filter available)
+    /// 9. Length filter — final catch for reads shortened by cumulative trimming
     fn build_modules(&self) -> Result<Vec<Box<dyn QcModule + Send + Sync>>> {
         let mut modules: Vec<Box<dyn QcModule + Send + Sync>> = Vec::new();
         let cfg = &self.config.modules;
@@ -645,7 +643,12 @@ impl Pipeline {
             modules.push(Box::new(ComplexityFilter::new(&cfg.complexity)));
         }
 
-        // 6. Contaminant screening — rRNA, PhiX, vectors (Phase 2)
+        // 6. Streaming deduplication — remove PCR duplicates before screening
+        if cfg.dedup.enabled {
+            modules.push(Box::new(StreamingDedup::new(&cfg.dedup)));
+        }
+
+        // 7. Contaminant screening — rRNA, PhiX, vectors (Phase 2)
         if cfg.contaminant.enabled {
             modules.push(Box::new(ContaminantScreener::new(&cfg.contaminant)));
         }
