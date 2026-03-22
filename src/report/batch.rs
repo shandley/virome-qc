@@ -180,7 +180,8 @@ h1 {{ font-size:22px; font-weight:700; letter-spacing:-0.02em; }}
 h2 {{ font-size:15px; font-weight:600; margin:28px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--border); }}
 .header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }}
 .header-meta {{ color:var(--muted-fg); font-size:13px; margin-top:4px; }}
-.theme-toggle {{ background:var(--muted); border:1px solid var(--border); border-radius:var(--radius); padding:5px 10px; cursor:pointer; font-family:var(--font-sans); font-size:11px; color:var(--muted-fg); }}
+.theme-toggle {{ background:var(--muted); border:1px solid var(--border); border-radius:var(--radius); padding:6px 12px; cursor:pointer; font-family:var(--font-sans); font-size:12px; font-weight:500; color:var(--muted-fg); display:inline-flex; align-items:center; gap:6px; transition:all .15s; }}
+.theme-toggle:hover {{ background:var(--border); color:var(--fg); }}
 table {{ width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); font-size:12px; }}
 th {{ background:var(--muted); text-align:left; padding:8px 10px; font-size:10px; font-weight:600; color:var(--muted-fg); text-transform:uppercase; letter-spacing:0.05em; cursor:pointer; user-select:none; }}
 th:hover {{ background:var(--border); }}
@@ -188,11 +189,11 @@ td {{ padding:6px 10px; border-top:1px solid var(--border); }}
 td.num {{ text-align:right; font-family:var(--font-mono); font-size:11px; }}
 .tier {{ display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; color:white; }}
 .tier-PASS {{ background:var(--pass); }} .tier-WARN {{ background:var(--warn); }} .tier-FAIL {{ background:var(--fail); }}
-.chart-panel {{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow); margin-bottom:12px; transition:background .2s; }}
-.chart-panel h3 {{ font-size:12px; font-weight:600; margin-bottom:8px; }}
-.chart-row {{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }}
-@media(max-width:900px) {{ .chart-row {{ grid-template-columns:1fr; }} }}
-canvas {{ max-height:200px; }}
+.chart-panel {{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); margin-bottom:16px; transition:background .2s,border-color .2s; }}
+.chart-panel h3 {{ font-size:13px; font-weight:600; margin-bottom:12px; }}
+.chart-row {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }}
+@media(max-width:768px) {{ .chart-row {{ grid-template-columns:1fr; }} }}
+canvas {{ max-height:260px; }}
 footer {{ margin-top:32px; padding-top:12px; border-top:1px solid var(--border); color:var(--muted-fg); font-size:11px; text-align:center; }}
 </style>
 </head>
@@ -200,7 +201,7 @@ footer {{ margin-top:32px; padding-top:12px; border-top:1px solid var(--border);
 <div class="container">
 <div class="header">
   <div><h1>virome-qc Batch Report</h1><div class="header-meta">{n} samples</div></div>
-  <button class="theme-toggle" onclick="document.documentElement.classList.toggle('dark');renderCharts()">Theme</button>
+  <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn"><span id="theme-label">Dark</span></button>
 </div>
 
 <h2>Sample Overview</h2>
@@ -302,8 +303,25 @@ function renderCharts() {{
   makeBarChart('ch-gc', samples.map(s => s.mean_gc), '--chart-1', 'GC');
 }}
 
-populateTable();
-renderCharts();
+function toggleTheme() {{
+  document.documentElement.classList.toggle('dark');
+  const isDark = document.documentElement.classList.contains('dark');
+  localStorage.setItem('virome-qc-theme', isDark ? 'dark' : 'light');
+  document.getElementById('theme-label').textContent = isDark ? 'Light' : 'Dark';
+  renderCharts();
+}}
+
+(function() {{
+  const saved = localStorage.getItem('virome-qc-theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (saved === 'dark' || (!saved && prefersDark)) {{
+    document.documentElement.classList.add('dark');
+    document.getElementById('theme-label').textContent = 'Light';
+  }}
+  Chart.defaults.font.family = "'Montserrat'";
+  populateTable();
+  renderCharts();
+}})();
 </script>
 </body>
 </html>"##,
