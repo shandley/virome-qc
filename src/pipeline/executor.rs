@@ -35,6 +35,8 @@ pub struct PipelineResult {
     pub thresholds: Thresholds,
     /// Comprehensive read analytics (per-position, distributions, duplication)
     pub qa_stats: Option<AnalyticsSnapshot>,
+    /// Input file provenance
+    pub provenance: Option<crate::report::passport::Provenance>,
 }
 
 impl PipelineResult {
@@ -116,6 +118,25 @@ impl Pipeline {
             .map(|m| (m.name().to_string(), m.report()))
             .collect();
 
+        let provenance = {
+            use crate::report::passport::{InputFileInfo, Provenance};
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs().to_string())
+                .unwrap_or_default();
+            let files = input_files
+                .iter()
+                .map(|p| InputFileInfo {
+                    path: p.display().to_string(),
+                    size_bytes: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
+                })
+                .collect();
+            Provenance {
+                timestamp,
+                input_files: files,
+            }
+        };
+
         Ok(PipelineResult {
             reads_input: total_input,
             reads_passed: total_passed,
@@ -127,6 +148,7 @@ impl Pipeline {
             profile_name: self.config.name.clone(),
             thresholds: self.config.thresholds.clone(),
             qa_stats: Some(qa.snapshot()),
+            provenance: Some(provenance),
         })
     }
 
@@ -233,6 +255,27 @@ impl Pipeline {
             .map(|m| (m.name().to_string(), m.report()))
             .collect();
 
+        let provenance = {
+            use crate::report::passport::{InputFileInfo, Provenance};
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs().to_string())
+                .unwrap_or_default();
+            Provenance {
+                timestamp,
+                input_files: vec![
+                    InputFileInfo {
+                        path: r1_path.display().to_string(),
+                        size_bytes: std::fs::metadata(r1_path).map(|m| m.len()).unwrap_or(0),
+                    },
+                    InputFileInfo {
+                        path: r2_path.display().to_string(),
+                        size_bytes: std::fs::metadata(r2_path).map(|m| m.len()).unwrap_or(0),
+                    },
+                ],
+            }
+        };
+
         Ok(PipelineResult {
             reads_input: reads_input.load(Ordering::Relaxed),
             reads_passed: reads_passed.load(Ordering::Relaxed),
@@ -244,6 +287,7 @@ impl Pipeline {
             profile_name: self.config.name.clone(),
             thresholds: self.config.thresholds.clone(),
             qa_stats: Some(qa.snapshot()),
+            provenance: Some(provenance),
         })
     }
 
@@ -297,6 +341,14 @@ impl Pipeline {
                 }
                 if is_concordant_fail(&ann_r2) && !ann_r1.is_failed() {
                     ann_r1.fail("concordant_mate");
+                }
+
+                // Propagate host_ambiguous flag to mate (same fragment)
+                if ann_r1.is_flagged() && !ann_r2.is_flagged() && !ann_r2.is_failed() {
+                    ann_r2.flag("host_ambiguous_mate");
+                }
+                if ann_r2.is_flagged() && !ann_r1.is_flagged() && !ann_r1.is_failed() {
+                    ann_r1.flag("host_ambiguous_mate");
                 }
 
                 (ann_r1, ann_r2)

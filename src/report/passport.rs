@@ -30,6 +30,20 @@ pub struct QcFlag {
     pub severity: QualityTier,
 }
 
+/// Input file provenance information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Provenance {
+    pub timestamp: String,
+    pub input_files: Vec<InputFileInfo>,
+}
+
+/// Information about an input file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputFileInfo {
+    pub path: String,
+    pub size_bytes: u64,
+}
+
 /// QA Passport — the primary structured output of virome-qc
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Passport {
@@ -62,6 +76,9 @@ pub struct Passport {
     /// Comprehensive read analytics (per-position, distributions, duplication)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qa_stats: Option<AnalyticsSnapshot>,
+    /// Input file provenance for reproducibility
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
 }
 
 impl Passport {
@@ -127,6 +144,7 @@ impl Passport {
             flags,
             quality_tier,
             qa_stats: result.qa_stats.clone(),
+            provenance: result.provenance.clone(),
         }
     }
 
