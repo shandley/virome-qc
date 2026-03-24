@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=12G
 #SBATCH --time=4:00:00
-#SBATCH --output=logs/vqc_%A_%a.out
-#SBATCH --error=logs/vqc_%A_%a.err
+#SBATCH --output=/scratch/sahlab/shandley/virome-qc-benchmark/logs/vqc_%A_%a.out
+#SBATCH --error=/scratch/sahlab/shandley/virome-qc-benchmark/logs/vqc_%A_%a.err
 #
 # virome-qc benchmark runner for HTCF
 # Submit as array job: sbatch --array=1-15 run_benchmark.sh
@@ -24,8 +24,7 @@ RESULTS="$WORKDIR/results"
 TMPDIR_BASE="$WORKDIR/tmp"
 
 source ~/.cargo/env 2>/dev/null
-source /ref/sahlab/software/miniforge3/bin/activate
-conda activate virome-qc-bench 2>/dev/null
+source /ref/sahlab/software/miniforge3/bin/activate virome-qc-bench 2>/dev/null
 
 mkdir -p "$RESULTS" "$TMPDIR_BASE" logs
 
@@ -79,15 +78,22 @@ mkdir -p "$TMPDIR"
 echo "--- Downloading $ACCESSION ---"
 cd "$TMPDIR"
 
-if [ "$PAIRED" = "PE" ]; then
-    fasterq-dump "$ACCESSION" --split-files --threads 4 --temp "$TMPDIR" $EXTRA 2>&1 | tail -5
+if [ -n "$EXTRA" ]; then
+    # Use fastq-dump when extra args are needed (e.g., -X for read limit)
+    echo "  Using fastq-dump with extra args: $EXTRA"
+    fastq-dump "$ACCESSION" --split-files --gzip --clip $EXTRA --outdir "$TMPDIR" 2>&1 | tail -3
+    R1="$TMPDIR/${ACCESSION}_1.fastq.gz"
+    R2="$TMPDIR/${ACCESSION}_2.fastq.gz"
+    if [ ! -f "$R2" ]; then R2=""; fi
+elif [ "$PAIRED" = "PE" ]; then
+    fasterq-dump "$ACCESSION" --split-files --threads 4 --temp "$TMPDIR" 2>&1 | tail -5
     # Compress
     pigz -p 4 "${ACCESSION}_1.fastq" "${ACCESSION}_2.fastq" 2>/dev/null || \
     gzip "${ACCESSION}_1.fastq" "${ACCESSION}_2.fastq"
     R1="$TMPDIR/${ACCESSION}_1.fastq.gz"
     R2="$TMPDIR/${ACCESSION}_2.fastq.gz"
 else
-    fasterq-dump "$ACCESSION" --threads 4 --temp "$TMPDIR" $EXTRA 2>&1 | tail -5
+    fasterq-dump "$ACCESSION" --threads 4 --temp "$TMPDIR" 2>&1 | tail -5
     # fasterq-dump may produce _1 even for SE
     if [ -f "${ACCESSION}_1.fastq" ]; then
         pigz -p 4 "${ACCESSION}_1.fastq" 2>/dev/null || gzip "${ACCESSION}_1.fastq"
