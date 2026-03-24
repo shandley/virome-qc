@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use virome_qc::modules::QcModule;
 
 #[derive(Parser)]
 #[command(name = "virome-qc")]
@@ -38,6 +39,10 @@ enum Commands {
         /// Merge overlapping paired-end reads
         #[arg(long, default_value = "false")]
         merge: bool,
+
+        /// Report only: generate passport and HTML report without writing clean FASTQ
+        #[arg(long, default_value = "false")]
+        report_only: bool,
 
         /// Number of threads
         #[arg(short, long, default_value = "4")]
@@ -129,6 +134,11 @@ enum Commands {
         #[arg(long)]
         host: Option<PathBuf>,
 
+        /// Build rRNA k-mer filter from SILVA FASTA file(s)
+        /// Provide one or more gzipped FASTA files (SSU + LSU)
+        #[arg(long, num_args = 0..)]
+        rrna: Option<Vec<PathBuf>>,
+
         /// Output path for the filter file
         #[arg(short, long, default_value = "host.sbf")]
         output: PathBuf,
@@ -158,12 +168,14 @@ fn main() -> Result<()> {
             r1,
             r2,
             merge,
+            report_only,
             threads,
         } => {
             let mut profile_config = virome_qc::Profile::load(&profile)?;
 
             // Run ingestion scan and apply platform-aware overrides
             let primary_input = r1.as_ref().unwrap_or(&input);
+            let mut ingestion_result = None;
             if let Ok(ingest) = virome_qc::ingest_fastq(primary_input, r2.as_deref()) {
                 if let Some(ref plat) = ingest.platform {
                     eprintln!(
@@ -187,16 +199,30 @@ fn main() -> Result<()> {
                         .unwrap_or(0.0);
                     eprintln!("Adapters:  {} detected ({:.1}%)", adapter, rate * 100.0);
                 }
+                // Early GC validation against profile expected range
+                if let Some((gc_min, gc_max)) = profile_config.thresholds.expected_gc_range {
+                    let gc = ingest.quick_scan.mean_gc;
+                    if gc < gc_min || gc > gc_max {
+                        eprintln!(
+                            "  Warning: Mean GC {:.1}% is outside expected range ({:.0}-{:.0}%) for this profile",
+                            gc * 100.0,
+                            gc_min * 100.0,
+                            gc_max * 100.0
+                        );
+                    }
+                }
                 for w in &ingest.warnings {
                     eprintln!("  Warning: {w}");
                 }
                 // Apply platform-detected overrides to profile
                 profile_config = virome_qc::apply_overrides(profile_config, &ingest);
+                ingestion_result = Some(ingest);
             }
 
+            let final_config = profile_config.clone();
             let pipeline = virome_qc::Pipeline::new(profile_config, threads);
 
-            let result = match (r1, r2) {
+            let mut result = match (r1, r2) {
                 (Some(r1_path), Some(r2_path)) => {
                     pipeline.run_paired(&r1_path, &r2_path, &output, merge)?
                 }
@@ -206,10 +232,36 @@ fn main() -> Result<()> {
                 }
             };
 
-            // Write QA passport
-            let passport = result.passport();
+            // Attach ingestion results and applied config to pipeline result
+            result.ingestion = ingestion_result;
+            result.applied_config = Some(final_config);
+
+            // Run ERV analysis on clean reads (post-pipeline)
+            let erv_results = run_erv_analysis(&result, &output);
+
+            // Write QA passport and HTML report
+            let mut passport = result.passport();
+
+            // Add ERV analysis results to passport
+            if let Some(erv_data) = erv_results {
+                passport.erv_analysis = Some(erv_data);
+            }
+
             passport.write_json(&output.join("passport.json"))?;
             virome_qc::report::generate_html_report(&passport, &output.join("report.html"))?;
+
+            // In report-only mode, remove FASTQ output files (keep passport + report)
+            if report_only {
+                for entry in std::fs::read_dir(&output)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if let Some(ext) = path.extension() {
+                        if ext == "gz" || ext == "fastq" || ext == "fq" {
+                            std::fs::remove_file(&path)?;
+                        }
+                    }
+                }
+            }
 
             println!(
                 "QC complete: {}/{} reads passed ({:.1}%)",
@@ -414,8 +466,55 @@ fn main() -> Result<()> {
             std::fs::write(&stats_path, stats_json)?;
             println!("\nStats written to: {}", stats_path.display());
         }
-        Commands::Db { host, output } => {
-            if let Some(ref host_arg) = host {
+        Commands::Db { host, rrna, output } => {
+            if let Some(ref rrna_paths) = rrna {
+                let rrna_output = if output.to_string_lossy() == "host.sbf" {
+                    std::path::PathBuf::from("rrna.rrf")
+                } else {
+                    output.clone()
+                };
+
+                let downloaded_paths: Vec<PathBuf>;
+                let paths: Vec<&std::path::Path> = if rrna_paths.is_empty() {
+                    // Auto-download SILVA SSU + LSU NR99
+                    let silva_dir = rrna_output.parent().unwrap_or(std::path::Path::new("."));
+                    let ssu_url = "https://www.arb-silva.de/fileadmin/silva_databases/release_138.2/Exports/SILVA_138.2_SSURef_NR99_tax_silva_trunc.fasta.gz";
+                    let lsu_url = "https://www.arb-silva.de/fileadmin/silva_databases/release_138.2/Exports/SILVA_138.2_LSURef_NR99_tax_silva_trunc.fasta.gz";
+
+                    let ssu_path = silva_dir.join("SILVA_138.2_SSU_NR99.fasta.gz");
+                    let lsu_path = silva_dir.join("SILVA_138.2_LSU_NR99.fasta.gz");
+
+                    for (url, path, name) in [
+                        (ssu_url, &ssu_path, "SSU (16S/18S)"),
+                        (lsu_url, &lsu_path, "LSU (23S/28S)"),
+                    ] {
+                        if !path.exists() {
+                            eprintln!("Downloading SILVA 138.2 {}...", name);
+                            let status = std::process::Command::new("curl")
+                                .args(["-L", "-o", &path.to_string_lossy(), url])
+                                .status()?;
+                            if !status.success() {
+                                anyhow::bail!("Failed to download SILVA {}", name);
+                            }
+                        } else {
+                            eprintln!("Using cached {}", path.display());
+                        }
+                    }
+
+                    downloaded_paths = vec![ssu_path, lsu_path];
+                    downloaded_paths.iter().map(|p| p.as_path()).collect()
+                } else {
+                    rrna_paths.iter().map(|p| p.as_path()).collect()
+                };
+
+                let start = std::time::Instant::now();
+                virome_qc::modules::rrna::RrnaFilter::build_filter(&paths, &rrna_output)?;
+                println!(
+                    "Done in {:.1}s. Filter: {}",
+                    start.elapsed().as_secs_f64(),
+                    rrna_output.display()
+                );
+            } else if let Some(ref host_arg) = host {
                 let fasta_path = if host_arg.exists() {
                     // Direct file path
                     host_arg.clone()
@@ -463,7 +562,7 @@ fn main() -> Result<()> {
                     output.display()
                 );
             } else {
-                eprintln!("Specify --host <reference.fa> or --host human to build a host filter");
+                eprintln!("Specify --host <reference.fa> or --rrna <silva.fasta.gz> to build a filter");
             }
         }
         Commands::Report { input, output } => {
@@ -480,6 +579,169 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Run post-pipeline ERV analysis on clean reads
+fn run_erv_analysis(
+    result: &virome_qc::PipelineResult,
+    output_dir: &std::path::Path,
+) -> Option<serde_json::Value> {
+    // Check if ERV module flagged any retroviral reads
+    let erv_report = result
+        .module_reports
+        .iter()
+        .find(|(name, _)| name == "erv");
+
+    let retroviral_count = erv_report
+        .and_then(|(_, report)| {
+            report
+                .extra
+                .get("retroviral_reads_flagged")
+                .and_then(|v| v.as_u64())
+        })
+        .unwrap_or(0);
+
+    if retroviral_count == 0 {
+        return None;
+    }
+
+    eprintln!(
+        "  ERV analysis: {} retroviral reads detected, classifying...",
+        retroviral_count
+    );
+
+    // Collect retroviral reads from clean output FASTQs
+    let erv_screener = virome_qc::modules::erv::ErvScreener::new();
+    let mut retroviral_reads: Vec<Vec<u8>> = Vec::new();
+
+    // Scan clean output files for retroviral reads
+    for entry in std::fs::read_dir(output_dir).ok()? {
+        let entry = entry.ok()?;
+        let path = entry.path();
+        let fname = path.file_name()?.to_string_lossy();
+        if !fname.starts_with("clean_") && !fname.starts_with("merged") {
+            continue;
+        }
+        if let Some(ext) = path.extension() {
+            if ext != "gz" && ext != "fastq" {
+                continue;
+            }
+        }
+
+        if let Ok(stream) = biometal::FastqStream::from_path(&path) {
+            for record in stream.flatten() {
+                let mut ann = virome_qc::pipeline::AnnotatedRecord::new(record);
+                erv_screener.process(&mut ann);
+                if ann.metrics.retroviral_signal {
+                    retroviral_reads.push(ann.record.sequence);
+                }
+            }
+        }
+    }
+
+    if retroviral_reads.is_empty() {
+        return Some(serde_json::json!({
+            "retroviral_reads_flagged": retroviral_count,
+            "retroviral_reads_collected": 0,
+            "clusters": [],
+            "summary": "No retroviral reads found in clean output"
+        }));
+    }
+
+    // Build reference panels
+    let sketch_config = biometal::operations::sketching::SketchConfig::new()
+        .with_k(15)
+        .with_sketch_size(1000);
+
+    let exo_panel = virome_qc::modules::erv_pipeline::build_exo_panel(&sketch_config);
+
+    // Try to load Dfam ERV panel if available
+    let erv_panel_path = output_dir
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("references/dfam/herv_consensus.fa");
+
+    let erv_panel = if erv_panel_path.exists() {
+        virome_qc::modules::erv_pipeline::load_erv_panel(&erv_panel_path, &sketch_config)
+    } else {
+        // Fall back to using the exogenous panel as both (less discriminatory)
+        virome_qc::modules::erv_pipeline::build_exo_panel(&sketch_config)
+    };
+
+    // Run classification
+    let config = virome_qc::modules::erv_pipeline::ErvAnalysisConfig {
+        sketch_size: 1000,
+        sketch_k: 15,
+        min_cluster_size: 3,
+        genomic_depth: result.reads_input as f64 / 100_000.0, // rough estimate
+    };
+
+    let classifications =
+        virome_qc::modules::erv_pipeline::analyze_erv_reads(
+            &retroviral_reads,
+            &erv_panel,
+            &exo_panel,
+            &config,
+        );
+
+    // Build passport JSON
+    let mut endogenous = 0;
+    let mut ambiguous = 0;
+    let mut exogenous = 0;
+
+    let loci: Vec<serde_json::Value> = classifications
+        .iter()
+        .map(|c| {
+            match c.classification {
+                virome_qc::modules::erv_classifier::ErvClassification::Endogenous => {
+                    endogenous += 1
+                }
+                virome_qc::modules::erv_classifier::ErvClassification::Ambiguous => {
+                    ambiguous += 1
+                }
+                virome_qc::modules::erv_classifier::ErvClassification::Exogenous => {
+                    exogenous += 1
+                }
+            }
+            serde_json::json!({
+                "cluster_id": c.cluster_id,
+                "reads": c.read_count,
+                "best_match": c.best_match,
+                "orf_intact": c.intact_orfs,
+                "orf_score": c.orf_score,
+                "cpg_ratio": c.cpg_ratio,
+                "cpg_score": c.cpg_score,
+                "nearest_erv": c.nearest_erv,
+                "dist_erv": c.dist_erv,
+                "nearest_exo": c.nearest_exo,
+                "dist_exo": c.dist_exo,
+                "minhash_score": c.minhash_score,
+                "combined_score": c.combined_score,
+                "classification": format!("{:?}", c.classification),
+                "depth_ratio": c.depth_ratio,
+            })
+        })
+        .collect();
+
+    eprintln!(
+        "  ERV analysis: {} clusters ({} endogenous, {} ambiguous, {} exogenous)",
+        classifications.len(),
+        endogenous,
+        ambiguous,
+        exogenous
+    );
+
+    Some(serde_json::json!({
+        "retroviral_reads_flagged": retroviral_count,
+        "retroviral_reads_collected": retroviral_reads.len(),
+        "clusters_total": classifications.len(),
+        "classifications": {
+            "endogenous": endogenous,
+            "ambiguous": ambiguous,
+            "exogenous": exogenous,
+        },
+        "loci": loci,
+    }))
 }
 
 fn discover_fastq_files(dir: &std::path::Path) -> Result<Vec<PathBuf>> {

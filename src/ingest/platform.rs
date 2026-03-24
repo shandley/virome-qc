@@ -372,6 +372,14 @@ mod tests {
     }
 
     #[test]
+    fn test_bgi_mgiseq_2000() {
+        let header = "@V300012345L1C001R00100000001/1";
+        let info = PlatformInfo::from_header(header).unwrap();
+        assert_eq!(info.model, "MGISEQ-2000");
+        assert_eq!(info.chemistry, Chemistry::FourColor);
+    }
+
+    #[test]
     fn test_pacbio_hifi() {
         let header = "@m64011_190830_220126/1/ccs";
         let info = PlatformInfo::from_header(header).unwrap();

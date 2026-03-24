@@ -17,15 +17,24 @@ virome-qc addresses all of these with a single, opinionated pipeline that produc
 
 ## Features
 
-- **6 QC modules** in biologically-motivated order: adapter trimming, poly-X removal, N-base filtering, quality trimming, complexity filtering, length filtering
+- **11 QC modules** in biologically-motivated order: adapter trimming, poly-X removal, N-base filtering, quality trimming, complexity filtering, streaming deduplication, contaminant screening, rRNA screening (SILVA), host depletion, ERV analysis, length filtering
 - **Internal adapter detection** using precomputed k-mer hash index with 1-mismatch tolerance
 - **Platform-aware poly-G** trimming with lower thresholds for two-color chemistry artifacts
-- **Paired-end support** with singleton handling and optional read merging
+- **Contaminant screening** for PhiX spike-in (with Microviridae exclusion) and cloning vectors
+- **rRNA screening** via SILVA-based sorted hash filter (165M k-mers, 78% sensitivity on diverse rRNA)
+- **Host depletion** via Super Bloom k-mer containment with three-way classification (host/ambiguous/keep)
+- **Paired-end support** with concordant mate handling, singleton output, and optional read merging
 - **Comprehensive analytics** including per-position quality, base composition, GC distribution, library complexity estimation (HyperLogLog), adapter breakdown, and insert size distribution
-- **Profile system** with presets for common virome sample types
+- **Interactive HTML reports** using React + shadcn/ui + Recharts with Catppuccin theme and dark mode
+- **Ingestion engine** that auto-detects platform, adapters, Q-score binning, per-position quality profile, and R2 quality degradation from the first 50K reads
+- **Profile system** with presets for common virome sample types and data-driven parameter overrides
+- **GC deviation detection** flags samples outside expected GC range for the profile
 - **Gzip I/O** for both input and output
 - **Parallel processing** via Rayon (160K+ reads/sec on Apple Silicon)
 - **Synthetic test corpus generator** with ground truth labels for benchmarking
+- **ERV analysis** classifies retroviral reads as endogenous (polymorphic HERV) or exogenous (active infection) using three-signal classifier (CpG depletion + MinHash + ORF integrity)
+- **Validated on 27 datasets** (12 real public + 12 ViroForge reference + 3 ViroForge benchmarks) across 6 sequencing platforms, 5 library preps, and 5 sample types
+- **Head-to-head with fastp**: virome-qc keeps more viral reads on clean data (+4.3%) and removes more contaminants on dirty data (-6.8%)
 
 Built on [biometal](https://github.com/shandley/biometal) for NEON-optimized sequence operations.
 
@@ -102,12 +111,10 @@ Available profiles:
 
 | Profile | Description |
 |---------|-------------|
-| `stool-vlp-tagmentation` | VLP-enriched stool with Nextera/tagmentation library prep |
-| `stool-vlp-truseq` | VLP-enriched stool with TruSeq library prep |
-| `tissue-truseq` | Tissue/biopsy with TruSeq (expects high host fraction) |
-| `metagenomics-nextera` | Shotgun metagenomics with Nextera |
+| `stool-vlp-tagmentation` | VLP-enriched stool virome (Nextera/tagmentation) |
+| `tissue-truseq` | Tissue/biopsy (expects high host fraction) |
+| `metagenomics-nextera` | Shotgun metagenomics |
 | `low-biomass-wga` | Low-input samples with whole-genome amplification (MDA/SISPA) |
-| `rna-virome-truseq` | RNA virome with TruSeq |
 
 Custom profiles can be provided as YAML files. See `profiles/stool-vlp-tagmentation.yaml` for the format.
 
@@ -120,9 +127,12 @@ Modules run in this order:
 3. **N-base filtering** -- Removes reads with excessive ambiguous bases. Threshold auto-set from ingestion N-rate.
 4. **Quality trimming** -- Sliding window quality trim from 3' end, leading quality trim from 5' end, mean quality filter. Bin-aware mode for NovaSeq/NextSeq quantized Q-scores (auto-detected).
 5. **Complexity filtering** -- Shannon entropy filter with data-driven threshold computed from the 2nd percentile of the sample's complexity distribution during ingestion.
-6. **Contaminant screening** -- k-mer containment against rRNA (16S/23S/5S prokaryotic, 18S/28S/5.8S eukaryotic), PhiX174, and cloning vectors (pUC19). Reports prokaryotic vs eukaryotic rRNA breakdown. Paired-end concordant flagging (if one mate is contaminant, the other is removed too).
-7. **Host depletion** -- Super Bloom k-mer containment screening against a pre-built host genome filter. Three-way classification: host (>50% containment, removed), ambiguous (15-50%, written to separate file), not host (<15%, kept). Requires building a filter first with `virome-qc db`.
-8. **Length filtering** -- Final safety net for reads shortened by cumulative trimming across all modules.
+6. **Streaming deduplication** -- Prefix hash deduplication using FxHashSet. Skips first 5bp (handles differential trimming) and uses 50bp prefix hash. Paired-end requires both mates to match. Disabled by default in single-end profiles.
+7. **Contaminant screening** -- k-mer containment against PhiX174 (with Microviridae exclusion to prevent gut phage false positives) and cloning vectors (pUC19). Paired-end concordant flagging (if one mate is contaminant, the other is removed too).
+8. **rRNA screening** -- SILVA-based sorted hash filter (165M FNV-1a hashes at k=21) for high-sensitivity rRNA detection across prokaryotic and eukaryotic species. Falls back to consensus k-mer screener when SILVA filter is not available. See [rRNA screening](#rrna-screening) below.
+9. **Host depletion** -- Super Bloom k-mer containment screening against a pre-built host genome filter (T2T-CHM13). Three-way classification: host (>50% containment, removed), ambiguous (20-50%, written to separate file), not host (<20%, kept). Containment distribution reported in passport for transparency. Zero viral false positive rate at 50% threshold (verified with ground truth). Enabled by default.
+10. **ERV analysis** -- Post-pipeline retroviral k-mer screen (101 references: 46 Retroviridae + 55 HERV consensus) with herpesvirus k-mer exclusion to prevent false positives. Classifies clusters as endogenous (polymorphic ERV, CpG-depleted) or exogenous (active infection, intact CpG) using three signals: ORF integrity, CpG depletion ratio, and MinHash distance. Reports per-locus classification in the passport. First virome QC tool with automated ERV vs exogenous retrovirus classification.
+11. **Length filtering** -- Final safety net for reads shortened by cumulative trimming across all modules.
 
 The ordering is intentional. Adapters must be removed first (non-biological sequence). Poly-X runs before quality trimming because NovaSeq poly-G artifacts have high quality scores and would survive Q-score-based trimming. Contaminant screening and host depletion run after all read cleaning to prevent adapter/quality artifacts from causing false classifications. Length filtering is last as a safety net.
 
@@ -144,11 +154,24 @@ The passport is designed for both human review and programmatic consumption. Dow
 
 ## HTML report
 
-Every run also generates an interactive `report.html` dashboard alongside the passport. Self-contained single file with Chart.js charts, Catppuccin theme, and dark mode toggle. Includes per-position quality profiles, base composition, read length distributions, GC content, survival funnel, contaminant breakdown, and adapter analysis. Can also be generated from an existing passport:
+Every run generates an interactive `report.html` dashboard alongside the passport. Self-contained single file (React + shadcn/ui + Recharts, inlined) with Catppuccin theme and dark mode toggle. Includes:
+
+- Summary stat cards: reads in/out, bases, survival, mean read length, mean quality, GC, library complexity, duplication, pairs/singletons/merge rate
+- Quality flags with severity (PASS/WARN/FAIL)
+- Survival funnel table with per-module breakdown
+- Adapter and contaminant cards with prokaryotic/eukaryotic rRNA breakdown
+- Per-position quality profiles with IQR band (before/after QC)
+- Stacked base composition charts (before/after QC)
+- Before/after read length overlay histogram
+- GC content, quality score, and insert size distributions
+
+Reports can also be generated from existing passport files:
 
 ```bash
 virome-qc report -i passport.json -o report.html
 ```
+
+Use `--report-only` with `virome-qc run` to generate only the passport and report without writing clean FASTQ output (useful for QC assessment without disk overhead).
 
 ## Host depletion
 
@@ -190,34 +213,77 @@ A summary JSON is written alongside the FASTQ with exact counts of each artifact
 
 ## Performance
 
-Benchmarked on Apple Silicon (M3 Max) with 1M reads (150bp):
+Benchmarked on Apple Silicon (M3 Max), all QC modules enabled including SILVA rRNA filter and T2T host depletion:
 
-| Threads | Wall time | Reads/sec |
-|---------|-----------|-----------|
-| 1 | 8s | 125K/sec |
-| 4 | 6.6s | 152K/sec |
-| 8 | 6.2s | 161K/sec |
+| Dataset | Reads | Wall time | Reads/sec |
+|---------|-------|-----------|-----------|
+| Zhang depleted (2M PE) | 2.0M | 43s | 47K/sec |
+| Cook (2.5M PE) | 2.5M | 101s | 25K/sec |
+| Shkoporov (12.6M PE) | 12.6M | 375s | 34K/sec |
 
-All QC modules enabled including internal adapter k-mer scan, per-position analytics, and HyperLogLog library complexity estimation.
+Performance includes loading the SILVA rRNA filter (1.3 GB, 165M k-mers) and T2T-CHM13 host filter (4.1 GB). Without these reference databases, throughput is ~160K reads/sec.
+
+### Comparison with fastp
+
+| Metric | fastp 1.3.0 | virome-qc |
+|--------|-------------|-----------|
+| Speed | 3-10x faster | Slower (reference database loading) |
+| Clean VLP virome (Shkoporov) | 93.3% survival | **97.6% survival** (+4.3% more viral reads kept) |
+| Contaminated virome (Zhang) | 79.8% survival | **73.0% survival** (-6.8% more contaminants removed) |
+| rRNA/host/PhiX detection | No | Yes |
+| ERV classification | No | Yes |
+| Data-driven thresholds | No | Yes (ingestion engine) |
+
+On clean VLP data, fastp over-filters with fixed quality thresholds. On contaminated data, fastp passes through rRNA, host DNA, and PhiX that virome-qc removes. virome-qc's ingestion engine adapts thresholds to the data, producing more appropriate filtering for each sample.
+
+## rRNA screening
+
+virome-qc includes two levels of rRNA screening:
+
+1. **Consensus rRNA screener** (built-in): k-mer matching against consensus rRNA sequences from 23 model organisms (~11,000 21-mers). Fast but limited sensitivity (~45% on diverse samples). Used as a fallback when the SILVA filter is not available.
+
+2. **SILVA rRNA filter** (recommended): Sorted hash vector of 165M FNV-1a hashes at k=21, built from SILVA SSU+LSU NR99 database. Binary search for O(log n) per k-mer lookup. 78% sensitivity on diverse rRNA, validated against ViroForge ground truth. Build once with `virome-qc db --rrna`.
+
+When the SILVA filter is available, it automatically replaces the consensus screener. The SILVA filter is enabled by default in all profiles and auto-discovers the filter file from standard locations.
+
+**Validation**: On Zhang undepleted stool (95% rRNA), the SILVA filter correctly identified 95.2% of reads as rRNA. On ViroForge reference datasets with known 10.9% rRNA injection, virome-qc achieved 78% sensitivity. On VLP-enriched samples, rRNA is typically <1% and the filter catches the majority.
 
 ## Ingestion engine
 
-Before QC runs, virome-qc scans the first 50,000 reads to auto-detect platform characteristics and configure the pipeline:
+Before QC runs, virome-qc scans the first 50,000 reads (R1 and R2 if paired) to auto-detect platform characteristics and configure the pipeline:
 
-- **Platform detection**: Illumina (MiSeq, NextSeq, NovaSeq, HiSeq, iSeq), BGI/MGI, PacBio, ONT, Element AVITI. Handles ENA-reformatted and SRA-stripped headers.
-- **Adapter auto-detection**: Identifies Nextera vs TruSeq/NEBNext from read content. Overrides profile if mismatch detected.
+- **Platform detection**: Illumina (MiSeq, NextSeq, NovaSeq, HiSeq, iSeq), BGI/MGI (DNBSEQ-G400, DNBSEQ-T7, MGISEQ-2000), PacBio, ONT, Element AVITI. Handles ENA-reformatted and SRA-stripped headers.
+- **Adapter auto-detection**: Identifies Nextera vs TruSeq/NEBNext from read content, with separate 3' tail and internal chimera rate tracking. Auto-enables internal adapter scanning when chimeras are detected.
+- **Per-position quality profile**: Tracks quality decay across read positions to detect 3' degradation patterns (e.g., MiSeq 2x250).
+- **R2 quality comparison**: Scans R2 separately and warns if quality is substantially lower than R1, indicating expected higher singleton rates.
+- **GC validation**: Checks mean GC against the profile's expected range and warns if outside bounds (e.g., ocean virome at 38% GC vs gut virome at 43%).
 - **Data-driven parameters**: Complexity threshold from sample distribution, quality window from read length, min read length from actual reads, poly-G behavior from detected chemistry, N-filter threshold from baseline N-rate.
 - **Q-score binning detection**: Automatically enables bin-aware quality trimming for NovaSeq/NextSeq.
 
 No user configuration needed -- the ingestion engine adjusts profile parameters based on the data.
 
+## Validation
+
+Validated on 27 datasets across 12 real public datasets (6 sequencing platforms, 5 library preps, 5 sample types) and 15 ViroForge synthetic datasets (12 reference atlas + 3 parameter sweep benchmarks). See [VALIDATION.md](VALIDATION.md) for complete results.
+
+Key findings:
+- **Zero viral false positive rate** in host depletion at 50% containment threshold (ground truth verified)
+- **ERV-host correlation**: Pearson r=0.871 (p=0.001) — retroviral content tracks host background
+- **Herpesvirus cross-reactivity**: identified and fixed via k-mer exclusion (99.3% FP reduction)
+- **Giant virus assessment**: systematic scan of 40 virus families, only Orthoherpesviridae significant
+- **fastp comparison**: virome-qc preserves more viral reads on clean data, removes more contaminants on dirty data
+- **21 bugs found** through bidirectional ViroForge validation (11 virome-qc + 10 ViroForge)
+
 ## Development status
 
-Phases 1-3 are complete. Planned additions:
+The tool is functional for production virome QC workflows. 133 tests, 24.8K lines Rust, clippy clean.
 
-- **Phase 4**: Duplicate detection (optical + PCR) with UMI support
-- **Phase 3b**: SNP-level endogenous vs exogenous retrovirus discrimination on ambiguous host reads
-- **EVE annotation**: Flagging reads that map to known endogenous viral element regions
+Planned additions:
+
+- **Long-read support**: ONT and PacBio QC modules (adapter trimming, quality filtering for long-read chemistry)
+- **Expected range reporting**: Embed ViroForge reference ranges into profiles, show user metrics vs expected range in reports
+- **Population ERV database**: Known polymorphic HERV insertion sites from the HPRC pangenome
+- **Coordinate-based EVE flagging**: BED annotation of known high-identity integration sites (ciHHV-6, recent HERV-K)
 
 ## License
 

@@ -1204,6 +1204,7 @@ dependencies = [
  "biometal",
  "clap",
  "env_logger",
+ "flate2",
  "log",
  "proptest",
  "rayon",

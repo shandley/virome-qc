@@ -79,6 +79,18 @@ pub struct Passport {
     /// Input file provenance for reproducibility
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provenance: Option<Provenance>,
+    /// Ingestion scan results (platform detection, sample characterization)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ingestion: Option<serde_json::Value>,
+    /// Applied module parameters (after all overrides, with source annotations)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Value>,
+    /// ERV analysis results (post-pipeline retroviral classification)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub erv_analysis: Option<serde_json::Value>,
+    /// Contamination summary: aggregates biological removal modules
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contamination_summary: Option<serde_json::Value>,
 }
 
 impl Passport {
@@ -96,31 +108,69 @@ impl Passport {
         let mut flags = Vec::new();
 
         // Check survival rate against profile threshold
-        if survival_rate < thresholds.min_survival_rate {
+        if survival_rate < thresholds.min_survival_rate * 1.5 {
+            // Identify the dominant cause of read loss
+            let dominant = modules
+                .iter()
+                .max_by_key(|m| m.reads_removed)
+                .map(|m| {
+                    let pct = m.reads_removed as f64 / result.reads_input as f64 * 100.0;
+                    format!(" -- largest contributor: {} ({:.1}%)", m.name, pct)
+                })
+                .unwrap_or_default();
+
+            let is_fail = survival_rate < thresholds.min_survival_rate;
             flags.push(QcFlag {
                 code: "LOW_SURVIVAL".into(),
                 message: format!(
-                    "Only {:.1}% of reads survived QC (threshold: {:.1}%)",
+                    "{}{:.1}% of reads survived QC (threshold: {:.1}%){}",
+                    if is_fail { "Only " } else { "" },
                     survival_rate * 100.0,
-                    thresholds.min_survival_rate * 100.0
+                    thresholds.min_survival_rate * 100.0,
+                    dominant,
                 ),
-                severity: QualityTier::Fail,
-            });
-        } else if survival_rate < thresholds.min_survival_rate * 1.5 {
-            // Warn if within 1.5x of the fail threshold
-            flags.push(QcFlag {
-                code: "LOW_SURVIVAL".into(),
-                message: format!(
-                    "{:.1}% read survival rate is approaching threshold ({:.1}%)",
-                    survival_rate * 100.0,
-                    thresholds.min_survival_rate * 100.0
-                ),
-                severity: QualityTier::Warn,
+                severity: if is_fail {
+                    QualityTier::Fail
+                } else {
+                    QualityTier::Warn
+                },
             });
         }
 
         // Check per-module metrics against thresholds
         Self::check_module_thresholds(&modules, result, thresholds, &mut flags);
+
+        // Check GC content against expected range
+        if let Some((gc_min, gc_max)) = thresholds.expected_gc_range {
+            if let Some(ref qa) = result.qa_stats {
+                let gc = &qa.distributions.gc_content;
+                if gc.total > 0 {
+                    let mut gc_sum = 0.0;
+                    let mut gc_count = 0u64;
+                    for (i, &c) in gc.counts.iter().enumerate() {
+                        if i < gc.bin_edges.len() {
+                            gc_sum += gc.bin_edges[i] * c as f64;
+                            gc_count += c;
+                        }
+                    }
+                    if gc_count > 0 {
+                        let mean_gc = gc_sum / gc_count as f64;
+                        if mean_gc < gc_min || mean_gc > gc_max {
+                            flags.push(QcFlag {
+                                code: "GC_DEVIATION".into(),
+                                message: format!(
+                                    "Mean GC {:.1}% is outside expected range ({:.0}-{:.0}%) for this profile",
+                                    mean_gc * 100.0,
+                                    gc_min * 100.0,
+                                    gc_max * 100.0
+                                ),
+                                severity: QualityTier::Warn,
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         // Determine overall tier from flags
         let quality_tier = if flags.iter().any(|f| f.severity == QualityTier::Fail) {
@@ -129,6 +179,107 @@ impl Passport {
             QualityTier::Warn
         } else {
             QualityTier::Pass
+        };
+
+        // Build ingestion section for passport
+        let ingestion_json = result.ingestion.as_ref().map(|ingest| {
+            serde_json::json!({
+                "reads_scanned": ingest.quick_scan.reads_scanned,
+                "platform": ingest.platform.as_ref().map(|p| serde_json::json!({
+                    "model": p.model,
+                    "chemistry": format!("{:?}", p.chemistry),
+                    "patterned_flowcell": p.patterned_flowcell,
+                })),
+                "read_length": ingest.reads.read_length,
+                "paired": ingest.reads.paired,
+                "mean_quality": ingest.quick_scan.mean_quality,
+                "mean_gc": ingest.quick_scan.mean_gc,
+                "n_rate": ingest.quick_scan.n_rate,
+                "complexity_p2": ingest.quick_scan.complexity_p2,
+                "quality_binned": ingest.quick_scan.quality_binned,
+                "dominant_adapter": ingest.quick_scan.dominant_adapter,
+                "adapter_3prime_rate": ingest.quick_scan.adapter_3prime_rate,
+                "adapter_internal_rate": ingest.quick_scan.adapter_internal_rate,
+                "r2_quality_delta": ingest.quick_scan.r2_quality_delta,
+                "quality_profile": ingest.quick_scan.quality_profile,
+            })
+        });
+
+        // Build applied parameters section
+        let parameters_json = result.applied_config.as_ref().map(|cfg| {
+            serde_json::json!({
+                "adapter": {
+                    "min_overlap": cfg.modules.adapter.min_overlap,
+                    "max_mismatch_rate": cfg.modules.adapter.max_mismatch_rate,
+                    "internal_scan": cfg.modules.adapter.internal_scan,
+                    "sequences": cfg.modules.adapter.sequences,
+                },
+                "quality": {
+                    "window_size": cfg.modules.quality.window_size,
+                    "min_quality": cfg.modules.quality.min_quality,
+                    "min_mean_quality": cfg.modules.quality.min_mean_quality,
+                    "min_length": cfg.modules.quality.min_length,
+                    "quality_binned": cfg.modules.quality.quality_binned,
+                },
+                "complexity": {
+                    "min_entropy": cfg.modules.complexity.min_entropy,
+                },
+                "polyx": {
+                    "platform_aware": cfg.modules.polyx.platform_aware,
+                    "min_length": cfg.modules.polyx.min_length,
+                },
+                "contaminant": {
+                    "min_kmer_fraction": cfg.modules.contaminant.min_kmer_fraction,
+                    "screen_rrna": cfg.modules.contaminant.screen_rrna,
+                    "screen_phix": cfg.modules.contaminant.screen_phix,
+                    "screen_vectors": cfg.modules.contaminant.screen_vectors,
+                },
+                "host": {
+                    "enabled": cfg.modules.host.enabled,
+                    "host_threshold": cfg.modules.host.host_threshold,
+                    "ambiguous_threshold": cfg.modules.host.ambiguous_threshold,
+                },
+                "dedup": {
+                    "enabled": cfg.modules.dedup.enabled,
+                },
+                "quality_assessment": {
+                    "min_survival_rate": cfg.thresholds.min_survival_rate,
+                    "expected_gc_range": cfg.thresholds.expected_gc_range,
+                    "max_host_fraction": cfg.thresholds.max_host_fraction,
+                    "max_rrna_fraction": cfg.thresholds.max_rrna_fraction,
+                    "max_duplicate_rate": cfg.thresholds.max_duplicate_rate,
+                },
+            })
+        });
+
+        // Compute contamination summary before moving modules
+        let contamination_summary = {
+            let biological_modules = ["contaminant", "rrna", "host"];
+            let technical_modules = [
+                "adapter", "polyx", "n_filter", "quality", "complexity", "dedup",
+            ];
+
+            let bio_removed: u64 = modules
+                .iter()
+                .filter(|m| biological_modules.contains(&m.name.as_str()))
+                .map(|m| m.reads_removed)
+                .sum();
+
+            let tech_removed: u64 = modules
+                .iter()
+                .filter(|m| technical_modules.contains(&m.name.as_str()))
+                .map(|m| m.reads_removed)
+                .sum();
+
+            let ri = result.reads_input as f64;
+            Some(serde_json::json!({
+                "biological_contamination_removed": bio_removed,
+                "biological_contamination_fraction": if ri > 0.0 { bio_removed as f64 / ri } else { 0.0 },
+                "technical_artifacts_removed": tech_removed,
+                "technical_artifacts_fraction": if ri > 0.0 { tech_removed as f64 / ri } else { 0.0 },
+                "total_removed": bio_removed + tech_removed,
+                "total_removed_fraction": if ri > 0.0 { (bio_removed + tech_removed) as f64 / ri } else { 0.0 },
+            }))
         };
 
         Self {
@@ -145,6 +296,10 @@ impl Passport {
             quality_tier,
             qa_stats: result.qa_stats.clone(),
             provenance: result.provenance.clone(),
+            ingestion: ingestion_json,
+            parameters: parameters_json,
+            erv_analysis: None,
+            contamination_summary,
         }
     }
 
@@ -177,11 +332,13 @@ impl Passport {
                     }
                 }
                 "adapter" => {
-                    // Check internal adapter rate specifically
+                    // Check internal adapter rate
+                    // Nextera/tagmentation preps inherently produce ~1-2% chimeras,
+                    // so use a higher threshold (2.5%) than ligation preps (1%)
                     if let Some(internal) = report.extra.get("adapters_found_internal") {
                         if let Some(count) = internal.as_u64() {
                             let internal_rate = count as f64 / result.reads_input as f64;
-                            if internal_rate > 0.01 {
+                            if internal_rate > 0.025 {
                                 flags.push(QcFlag {
                                     code: "HIGH_INTERNAL_ADAPTER".into(),
                                     message: format!(
@@ -193,11 +350,49 @@ impl Passport {
                             }
                         }
                     }
+
+                    // Check internal adapter contamination rate
+                    if let Some(internal) = report.extra.get("adapters_found_internal") {
+                        if let Some(count) = internal.as_u64() {
+                            let internal_rate = count as f64 / result.reads_input as f64;
+                            if internal_rate > 0.05 {
+                                flags.push(QcFlag {
+                                    code: "HIGH_INTERNAL_ADAPTER".into(),
+                                    message: format!(
+                                        "{:.1}% of reads contain internal adapter chimeras -- possible library quality issue",
+                                        internal_rate * 100.0
+                                    ),
+                                    severity: if internal_rate > 0.20 {
+                                        QualityTier::Fail
+                                    } else {
+                                        QualityTier::Warn
+                                    },
+                                });
+                            }
+                        }
+                    }
+
+                    // Check 3' adapter trimming rate -- high rates indicate short inserts
+                    if let Some(trimmed) = report.extra.get("adapters_found_3prime") {
+                        if let Some(count) = trimmed.as_u64() {
+                            let trim_rate = count as f64 / result.reads_input as f64;
+                            if trim_rate > 0.20 {
+                                flags.push(QcFlag {
+                                    code: "HIGH_ADAPTER_TRIMMING".into(),
+                                    message: format!(
+                                        "{:.1}% of reads had adapter trimmed (short inserts)",
+                                        trim_rate * 100.0
+                                    ),
+                                    severity: QualityTier::Warn,
+                                });
+                            }
+                        }
+                    }
                 }
                 "polyx" => {
-                    // High poly-X rate suggests platform issue (NovaSeq/NextSeq)
+                    // High poly-X rate suggests platform artifact or fragmented library
                     let polyx_rate = report.reads_modified as f64 / result.reads_input as f64;
-                    if polyx_rate > 0.15 {
+                    if polyx_rate > 0.05 {
                         flags.push(QcFlag {
                             code: "HIGH_POLYX".into(),
                             message: format!(
@@ -240,13 +435,40 @@ impl Passport {
                         }
                     }
                 }
+                "rrna" => {
+                    // Check SILVA rRNA filter results (separate from contaminant consensus rRNA)
+                    let rrna_fraction = report.reads_removed as f64 / result.reads_input as f64;
+                    if rrna_fraction > thresholds.max_rrna_fraction {
+                        let context = if rrna_fraction > 0.50 {
+                            " -- sample may lack rRNA depletion or VLP enrichment"
+                        } else if rrna_fraction > 0.10 {
+                            " -- consider whether rRNA depletion was incomplete or library prep captures small rRNA fragments"
+                        } else {
+                            ""
+                        };
+                        flags.push(QcFlag {
+                            code: "HIGH_RRNA".into(),
+                            message: format!(
+                                "{:.1}% rRNA detected by SILVA filter (threshold: {:.1}%){}",
+                                rrna_fraction * 100.0,
+                                thresholds.max_rrna_fraction * 100.0,
+                                context,
+                            ),
+                            severity: if rrna_fraction > 0.50 {
+                                QualityTier::Fail
+                            } else {
+                                QualityTier::Warn
+                            },
+                        });
+                    }
+                }
                 "host" => {
                     let host_fraction = report.reads_removed as f64 / result.reads_input as f64;
                     if host_fraction > thresholds.max_host_fraction {
                         flags.push(QcFlag {
                             code: "HIGH_HOST".into(),
                             message: format!(
-                                "{:.1}% host reads exceeds threshold ({:.1}%)",
+                                "{:.1}% host reads exceeds threshold ({:.1}%) -- consider VLP enrichment or host depletion upstream",
                                 host_fraction * 100.0,
                                 thresholds.max_host_fraction * 100.0
                             ),
@@ -254,12 +476,24 @@ impl Passport {
                         });
                     }
                 }
-                // Future: "dedup" -> check dup rate
+                "dedup" => {
+                    let dup_rate = report.reads_removed as f64 / result.reads_input as f64;
+                    if dup_rate > thresholds.max_duplicate_rate {
+                        flags.push(QcFlag {
+                            code: "HIGH_DUPLICATION".into(),
+                            message: format!(
+                                "{:.1}% of reads removed as duplicates (threshold: {:.0}%)",
+                                dup_rate * 100.0,
+                                thresholds.max_duplicate_rate * 100.0
+                            ),
+                            severity: QualityTier::Warn,
+                        });
+                    }
+                }
                 _ => {}
             }
         }
 
-        let _ = thresholds.max_duplicate_rate;
         let _ = thresholds.max_host_fraction;
     }
 

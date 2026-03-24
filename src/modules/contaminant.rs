@@ -67,6 +67,19 @@ impl ContaminantScreener {
 
         if config.screen_phix {
             add_sequence_kmers(PHIX174, CONTAMINANT_K, &mut phix_idx);
+            // Remove k-mers shared with natural Microviridae to prevent
+            // false positives on gut phages related to PhiX174.
+            // The exclusion set was computed from 20 Microviridae genomes
+            // in RefSeq (coliphages, Chlamydia phages, Spiroplasma phage, etc.)
+            let before = phix_idx.len();
+            for &shared_hash in PHIX_MICROVIRIDAE_SHARED {
+                phix_idx.remove(&shared_hash);
+            }
+            log::debug!(
+                "PhiX index: {} k-mers after removing {} shared with Microviridae",
+                phix_idx.len(),
+                before - phix_idx.len()
+            );
             unified.extend(phix_idx.iter());
         }
 
@@ -281,7 +294,7 @@ mod tests {
             screen_phix: phix,
             screen_vectors: vectors,
             screen_kitome: false,
-            min_kmer_fraction: 0.4,
+            min_kmer_fraction: 0.25,
         }
     }
 
@@ -417,6 +430,46 @@ mod tests {
         assert!(
             !record.is_failed(),
             "rRNA should pass when screening disabled"
+        );
+    }
+
+    #[test]
+    fn test_phix_exclusion_set_applied() {
+        let screener = ContaminantScreener::new(&make_config(false, true, false));
+
+        // The PhiX index should have exclusion hashes removed
+        // Full PhiX174 (5386bp) generates ~10,732 k-mers (both strands)
+        // After removing 334 shared with Microviridae: ~10,398
+        let report = screener.report();
+        let index_size = report
+            .extra
+            .get("index_size_phix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        // Should be fewer than the raw k-mer count (exclusion applied)
+        assert!(
+            index_size < 10_732,
+            "PhiX index should have exclusion applied, got {index_size}"
+        );
+        // Should have roughly 10,398 k-mers (10,732 - 334)
+        assert!(
+            index_size > 10_000,
+            "PhiX index too small after exclusion: {index_size}"
+        );
+    }
+
+    #[test]
+    fn test_phix_detects_real_phix_after_exclusion() {
+        let screener = ContaminantScreener::new(&make_config(false, true, false));
+        // Take a 150bp fragment from the middle of PhiX -- should still be detected
+        // even after Microviridae k-mer exclusion
+        let fragment = &PHIX174[2000..2150];
+        let mut record = make_record(fragment);
+        screener.process(&mut record);
+        assert!(
+            record.is_failed(),
+            "PhiX read should still be detected after Microviridae exclusion"
         );
     }
 }

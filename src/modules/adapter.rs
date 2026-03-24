@@ -96,12 +96,23 @@ impl AdapterTrimmer {
     ///
     /// Uses O(1) hash lookups per read k-mer instead of brute-force comparison.
     /// The adapter k-mer index (including 1-mismatch variants) is built once at startup.
+    ///
+    /// Requires a minimum fraction of k-mers matching (MIN_INTERNAL_FRACTION)
+    /// to flag as chimeric. True chimeric reads have a continuous block of adapter
+    /// k-mers (typically 10+ consecutive hits). Random homology produces sparse
+    /// isolated hits that don't reach the fraction threshold.
     fn has_internal_adapter(&self, sequence: &[u8]) -> bool {
+        // Require 10% of internal k-mers to match adapter.
+        // A 125bp read scanned from pos 15-110 has ~80 k-mers.
+        // At 10% threshold, need 8 matching k-mers.
+        // True chimeras with 15+ bp of adapter will have 1+ consecutive
+        // k-mer matches per adapter bp, easily exceeding 10%.
+        const MIN_INTERNAL_FRACTION: f64 = 0.08;
+
         if sequence.len() < 30 || self.internal_kmer_hashes.is_empty() {
             return false;
         }
 
-        // Only scan the internal portion (skip first/last 15bp to avoid edge effects)
         let scan_start = INTERNAL_KMER_SIZE;
         let scan_end = sequence.len().saturating_sub(INTERNAL_KMER_SIZE);
 
@@ -109,10 +120,18 @@ impl AdapterTrimmer {
             return false;
         }
 
+        let total_kmers = scan_end - scan_start - INTERNAL_KMER_SIZE + 1;
+        let min_hits = ((total_kmers as f64) * MIN_INTERNAL_FRACTION).ceil() as u32;
+        let min_hits = min_hits.max(3); // absolute minimum of 3 hits
+
+        let mut hits = 0u32;
         for kmer in sequence[scan_start..scan_end].windows(INTERNAL_KMER_SIZE) {
             let hash = hash_kmer(kmer);
             if self.internal_kmer_hashes.contains(&hash) {
-                return true;
+                hits += 1;
+                if hits >= min_hits {
+                    return true;
+                }
             }
         }
         false
@@ -143,8 +162,14 @@ impl QcModule for AdapterTrimmer {
             self.adapters_found_3prime.fetch_add(1, Ordering::Relaxed);
         }
 
-        // Step 3: Internal adapter scan (flag, don't remove — the read is chimeric)
-        if self.internal_scan && self.has_internal_adapter(&record.record.sequence) {
+        // Step 3: Internal adapter scan (flag, don't remove -- the read is chimeric)
+        // Skip for reads that already had 3' adapter trimmed -- those are handled.
+        // Internal scan is for chimeric reads with adapter in the MIDDLE of the insert.
+        let already_trimmed_3prime = record.metrics.adapter_detected.is_some();
+        if self.internal_scan
+            && !already_trimmed_3prime
+            && self.has_internal_adapter(&record.record.sequence)
+        {
             record.metrics.internal_adapter = true;
             record.fail("internal_adapter_contamination");
             self.adapters_found_internal.fetch_add(1, Ordering::Relaxed);

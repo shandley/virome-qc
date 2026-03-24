@@ -29,12 +29,16 @@ modules:
     screen_phix: true
     screen_vectors: true
     screen_kitome: false
-    min_kmer_fraction: 0.4
+    min_kmer_fraction: 0.25
+  rrna:
+    enabled: true
+    filter: auto
+    min_kmer_fraction: 0.25
   host:
-    enabled: false
+    enabled: true
     reference: human
-    eve_aware: false
-    rescue: false
+    eve_aware: true
+    rescue: true
   dedup:
     enabled: false
     optical_distance: 2500
@@ -47,3 +51,4 @@ thresholds:
   max_host_fraction: 0.80
   max_rrna_fraction: 0.15
   max_duplicate_rate: 0.50
+  expected_gc_range: [0.35, 0.65]

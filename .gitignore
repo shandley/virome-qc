@@ -5,4 +5,9 @@
 *.fq.gz
 *.bam
 *.sam
+*.sbf
+*.rrf
+*.fasta
 .DS_Store
+report-ui/node_modules/
+benchmark_data/

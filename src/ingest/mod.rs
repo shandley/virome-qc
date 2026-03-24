@@ -9,7 +9,7 @@
 
 mod overrides;
 mod platform;
-mod scan;
+pub mod scan;
 
 pub use overrides::apply_overrides;
 pub use platform::PlatformInfo;

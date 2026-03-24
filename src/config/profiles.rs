@@ -31,6 +31,8 @@ pub struct ModuleConfigs {
     pub polyx: PolyXConfig,
     pub complexity: ComplexityConfig,
     pub contaminant: ContaminantConfig,
+    #[serde(default)]
+    pub rrna: Option<RrnaConfig>,
     pub host: HostConfig,
     pub dedup: DedupConfig,
     pub chimera: ChimeraConfig,
@@ -108,6 +110,26 @@ pub struct ContaminantConfig {
     pub min_kmer_fraction: f64,
 }
 
+/// rRNA screening configuration (SILVA-based k-mer filter)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RrnaConfig {
+    pub enabled: bool,
+    /// Path to rRNA filter file (.rrf) or "auto" to check standard locations
+    #[serde(default = "default_rrna_filter")]
+    pub filter: String,
+    /// Minimum fraction of read k-mers matching rRNA database to classify as rRNA
+    #[serde(default = "default_rrna_threshold")]
+    pub min_kmer_fraction: f64,
+}
+
+fn default_rrna_filter() -> String {
+    "auto".into()
+}
+
+fn default_rrna_threshold() -> f64 {
+    0.25
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostConfig {
     pub enabled: bool,
@@ -157,6 +179,10 @@ pub struct Thresholds {
     pub max_rrna_fraction: f64,
     /// Maximum duplicate rate (above = WARN)
     pub max_duplicate_rate: f64,
+    /// Expected GC content range [min, max] for this sample type (0.0-1.0)
+    /// Deviation beyond this range triggers a WARN flag
+    #[serde(default)]
+    pub expected_gc_range: Option<(f64, f64)>,
 }
 
 // Default value functions for serde
@@ -169,8 +195,10 @@ fn default_max_mismatch_rate() -> f64 {
 fn default_min_polyx_len() -> usize {
     10
 }
+/// ROC-calibrated: ViroForge sweep showed zero false positives at all thresholds
+/// (0.10-0.60). Lowered from 0.40 to 0.25 to gain ~5% sensitivity at zero FP cost.
 fn default_contaminant_threshold() -> f64 {
-    0.4
+    0.25
 }
 
 /// Profile loader and manager
@@ -252,11 +280,9 @@ impl Profile {
     fn builtin_names() -> Vec<&'static str> {
         vec![
             "stool-vlp-tagmentation",
-            "stool-vlp-truseq",
             "tissue-truseq",
             "metagenomics-nextera",
             "low-biomass-wga",
-            "rna-virome-truseq",
         ]
     }
 
@@ -309,10 +335,10 @@ impl Profile {
                     screen_phix: true,
                     screen_vectors: true,
                     screen_kitome: false,
-                    min_kmer_fraction: 0.4,
+                    min_kmer_fraction: 0.25,
                 },
                 host: HostConfig {
-                    enabled: false,
+                    enabled: true,
                     reference: "human".into(),
                     host_threshold: 0.50,
                     ambiguous_threshold: 0.20,
@@ -325,12 +351,18 @@ impl Profile {
                     umi_aware: false,
                 },
                 chimera: ChimeraConfig { enabled: false },
+                rrna: Some(RrnaConfig {
+                    enabled: true,
+                    filter: "auto".into(),
+                    min_kmer_fraction: 0.25,
+                }),
             },
             thresholds: Thresholds {
                 min_survival_rate: 0.30,
                 max_host_fraction: 0.20,
                 max_rrna_fraction: 0.05,
                 max_duplicate_rate: 0.50,
+                expected_gc_range: Some((0.35, 0.55)),
             },
         }
     }
@@ -373,10 +405,10 @@ impl Profile {
                     screen_phix: true,
                     screen_vectors: true,
                     screen_kitome: false,
-                    min_kmer_fraction: 0.4,
+                    min_kmer_fraction: 0.25,
                 },
                 host: HostConfig {
-                    enabled: false,
+                    enabled: true,
                     reference: "human".into(),
                     host_threshold: 0.50,
                     ambiguous_threshold: 0.20,
@@ -389,12 +421,18 @@ impl Profile {
                     umi_aware: false,
                 },
                 chimera: ChimeraConfig { enabled: false },
+                rrna: Some(RrnaConfig {
+                    enabled: true,
+                    filter: "auto".into(),
+                    min_kmer_fraction: 0.25,
+                }),
             },
             thresholds: Thresholds {
                 min_survival_rate: 0.01, // tissue may lose >99% to host
                 max_host_fraction: 0.99,
                 max_rrna_fraction: 0.10,
                 max_duplicate_rate: 0.50,
+                expected_gc_range: Some((0.35, 0.55)),
             },
         }
     }
@@ -437,10 +475,10 @@ impl Profile {
                     screen_phix: true,
                     screen_vectors: true,
                     screen_kitome: false,
-                    min_kmer_fraction: 0.4,
+                    min_kmer_fraction: 0.25,
                 },
                 host: HostConfig {
-                    enabled: false,
+                    enabled: true,
                     reference: "human".into(),
                     host_threshold: 0.50,
                     ambiguous_threshold: 0.20,
@@ -453,12 +491,18 @@ impl Profile {
                     umi_aware: false,
                 },
                 chimera: ChimeraConfig { enabled: false },
+                rrna: Some(RrnaConfig {
+                    enabled: true,
+                    filter: "auto".into(),
+                    min_kmer_fraction: 0.25,
+                }),
             },
             thresholds: Thresholds {
                 min_survival_rate: 0.10,
                 max_host_fraction: 0.80,
                 max_rrna_fraction: 0.15,
                 max_duplicate_rate: 0.50,
+                expected_gc_range: Some((0.40, 0.65)),
             },
         }
     }
@@ -501,10 +545,10 @@ impl Profile {
                     screen_phix: true,
                     screen_vectors: true,
                     screen_kitome: true, // important for low-biomass
-                    min_kmer_fraction: 0.4,
+                    min_kmer_fraction: 0.25,
                 },
                 host: HostConfig {
-                    enabled: false,
+                    enabled: true,
                     reference: "human".into(),
                     host_threshold: 0.50,
                     ambiguous_threshold: 0.20,
@@ -519,12 +563,18 @@ impl Profile {
                 chimera: ChimeraConfig {
                     enabled: true, // WGA produces chimeras
                 },
+                rrna: Some(RrnaConfig {
+                    enabled: true,
+                    filter: "auto".into(),
+                    min_kmer_fraction: 0.25,
+                }),
             },
             thresholds: Thresholds {
                 min_survival_rate: 0.10,
                 max_host_fraction: 0.90,
                 max_rrna_fraction: 0.10,
                 max_duplicate_rate: 0.70, // high duplication expected with WGA
+                expected_gc_range: Some((0.35, 0.55)),
             },
         }
     }

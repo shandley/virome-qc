@@ -31,6 +31,8 @@ pub struct ReadMetrics {
     pub complexity: Option<f64>,
     /// Mean quality after trimming
     pub mean_quality: Option<f64>,
+    /// Retroviral k-mer signal detected (ERV analysis)
+    pub retroviral_signal: bool,
 }
 
 /// A FASTQ record annotated with QA tags that flows through the pipeline

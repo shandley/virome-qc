@@ -11,6 +11,9 @@ use std::path::Path;
 /// Number of reads to scan for quick characterization
 const SCAN_SIZE: usize = 50_000;
 
+/// Number of per-position quality buckets to track
+const POSITION_BUCKETS: usize = 10;
+
 /// Adapter families with distinguishing sequences (forward + RC for read-through)
 /// Each family has a unique identifying sequence that doesn't overlap with others.
 struct AdapterFamily {
@@ -108,6 +111,19 @@ pub struct QuickScanStats {
     pub complexity_p5: f64,
     /// Complexity score distribution: median
     pub complexity_median: f64,
+    /// Per-position quality profile (10 evenly-spaced buckets across read length)
+    /// Each value is mean Phred quality at that fractional position
+    pub quality_profile: Vec<f64>,
+    /// 3' adapter hit rate (read-through, separate from internal)
+    pub adapter_3prime_rate: f64,
+    /// Internal adapter chimera rate
+    pub adapter_internal_rate: f64,
+    /// R2 mean quality (None if single-end or R2 not scanned)
+    pub r2_mean_quality: Option<f64>,
+    /// R2 quality profile (same bucketing as R1)
+    pub r2_quality_profile: Option<Vec<f64>>,
+    /// Quality drop from R1 to R2 (negative = R2 is worse)
+    pub r2_quality_delta: Option<f64>,
 }
 
 /// A recommendation for QC configuration
@@ -118,10 +134,49 @@ pub struct Recommendation {
     pub reason: String,
 }
 
+/// Accumulator for per-position quality across multiple reads
+struct PositionQualityAccum {
+    sums: Vec<f64>,
+    counts: Vec<u64>,
+    num_buckets: usize,
+}
+
+impl PositionQualityAccum {
+    fn new(num_buckets: usize) -> Self {
+        Self {
+            sums: vec![0.0; num_buckets],
+            counts: vec![0; num_buckets],
+            num_buckets,
+        }
+    }
+
+    fn add(&mut self, qual: &[u8]) {
+        let len = qual.len();
+        if len == 0 {
+            return;
+        }
+        for bucket in 0..self.num_buckets {
+            let pos = (bucket * (len - 1)) / (self.num_buckets - 1).max(1);
+            let pos = pos.min(len - 1);
+            let q = qual[pos].saturating_sub(33) as f64;
+            self.sums[bucket] += q;
+            self.counts[bucket] += 1;
+        }
+    }
+
+    fn means(&self) -> Vec<f64> {
+        self.sums
+            .iter()
+            .zip(self.counts.iter())
+            .map(|(&s, &c)| if c > 0 { s / c as f64 } else { 0.0 })
+            .collect()
+    }
+}
+
 /// Run ingestion analysis on FASTQ file(s)
 ///
-/// Scans the first 10,000 reads to detect platform, read characteristics,
-/// and potential issues. Runs in <100ms for gzipped input.
+/// Scans the first 50,000 reads to detect platform, read characteristics,
+/// and potential issues. Runs in <1s for gzipped input.
 pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResult> {
     let stream = FastqStream::from_path(r1_path)?;
 
@@ -139,11 +194,14 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     let mut max_length = 0usize;
     let mut min_qual_byte = 255u8;
 
-    // Adapter detection
-    // Per-adapter-family hit counts
-    let mut adapter_hits: HashMap<String, usize> = HashMap::new();
+    // Adapter detection -- separate 3' tail and internal counts
+    let mut adapter_3prime_hits: HashMap<String, usize> = HashMap::new();
+    let mut adapter_internal_hits: HashMap<String, usize> = HashMap::new();
+    let mut adapter_any_hits: HashMap<String, usize> = HashMap::new();
     for family in ADAPTER_FAMILIES {
-        adapter_hits.insert(family.name.to_string(), 0);
+        adapter_3prime_hits.insert(family.name.to_string(), 0);
+        adapter_internal_hits.insert(family.name.to_string(), 0);
+        adapter_any_hits.insert(family.name.to_string(), 0);
     }
 
     // Position 0 N-count
@@ -155,6 +213,9 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
 
     // Complexity score collection
     let mut complexity_scores: Vec<f64> = Vec::with_capacity(SCAN_SIZE);
+
+    // Per-position quality profile
+    let mut pos_quality = PositionQualityAccum::new(POSITION_BUCKETS);
 
     for record in stream {
         let record = record?;
@@ -182,6 +243,9 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
             }
         }
 
+        // Per-position quality
+        pos_quality.add(qual);
+
         // GC content
         total_gc += gc_content(seq);
 
@@ -201,15 +265,14 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
             }
         }
 
-        // Adapter family detection: scan read for each family's probe sequences
-        // Check both 3' tail (read-through) and internal (chimeric)
+        // Adapter family detection: scan for 3' tail and internal separately
         if len >= 20 {
             'family: for family in ADAPTER_FAMILIES {
                 for probe in family.probes {
-                    let probe_len = probe.len().min(15); // use first 15bp of probe
+                    let probe_len = probe.len().min(15);
                     let probe_slice = &probe[..probe_len];
 
-                    // Check 3' tail
+                    // Check 3' tail (last probe_len + 5 bases)
                     if len >= probe_len {
                         let tail_start = len.saturating_sub(probe_len + 5);
                         for window in seq[tail_start..].windows(probe_len) {
@@ -219,22 +282,24 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
                                 .filter(|(a, b)| !a.eq_ignore_ascii_case(b))
                                 .count();
                             if mm <= 2 {
-                                *adapter_hits.get_mut(family.name).unwrap() += 1;
+                                *adapter_3prime_hits.get_mut(family.name).unwrap() += 1;
+                                *adapter_any_hits.get_mut(family.name).unwrap() += 1;
                                 continue 'family;
                             }
                         }
                     }
 
-                    // Check substring anywhere (catches internal adapters too)
-                    if len >= probe_len + 10 {
-                        for window in seq[..len.saturating_sub(5)].windows(probe_len) {
+                    // Check internal (excluding last 20bp to avoid 3' overlap)
+                    if len >= probe_len + 20 {
+                        for window in seq[..len.saturating_sub(20)].windows(probe_len) {
                             let mm: usize = window
                                 .iter()
                                 .zip(probe_slice.iter())
                                 .filter(|(a, b)| !a.eq_ignore_ascii_case(b))
                                 .count();
                             if mm <= 1 {
-                                *adapter_hits.get_mut(family.name).unwrap() += 1;
+                                *adapter_internal_hits.get_mut(family.name).unwrap() += 1;
+                                *adapter_any_hits.get_mut(family.name).unwrap() += 1;
                                 continue 'family;
                             }
                         }
@@ -252,6 +317,20 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     if total_reads == 0 {
         anyhow::bail!("No reads found in {}", r1_path.display());
     }
+
+    // R2 scan (if paired-end)
+    let r2_scan = if let Some(r2) = r2_path {
+        scan_r2(r2, total_reads, total_quality / total_reads as f64)?
+    } else {
+        R2ScanResult {
+            mean_quality: None,
+            quality_profile: None,
+            quality_delta: None,
+        }
+    };
+    let r2_mean_quality = r2_scan.mean_quality;
+    let r2_quality_profile = r2_scan.quality_profile;
+    let r2_quality_delta = r2_scan.quality_delta;
 
     // Compute statistics
     let mean_gc = total_gc / total_reads as f64;
@@ -271,9 +350,7 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         .unwrap_or(0);
     let variable_length = length_counts.len() > 1;
 
-    // Quality encoding: Phred+33 (modern standard) vs Phred+64 (Illumina 1.3-1.7, pre-2011)
-    // If min quality byte < 59, definitely Phred+33 (can't be a valid Phred+64 quality)
-    // Ambiguous range 59-64 exists but all modern data is Phred+33
+    // Quality encoding
     let quality_offset = if min_qual_byte < 59 {
         33
     } else if min_qual_byte >= 75 {
@@ -284,10 +361,10 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
 
     // Quality binning detection
     let distinct_quality_values = quality_value_seen.iter().filter(|&&v| v).count();
-    let quality_binned = distinct_quality_values <= 8; // NovaSeq uses 4 values (2,12,23,37)
+    let quality_binned = distinct_quality_values <= 8;
 
     // Adapter detection: determine dominant family and get config names
-    let adapter_rates: HashMap<String, f64> = adapter_hits
+    let adapter_rates: HashMap<String, f64> = adapter_any_hits
         .iter()
         .filter(|(_, &count)| count > 0)
         .map(|(name, &count)| (name.clone(), count as f64 / total_reads as f64))
@@ -296,10 +373,9 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     let dominant_adapter = adapter_rates
         .iter()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-        .filter(|(_, &rate)| rate > 0.001) // at least 0.1% to be confident
+        .filter(|(_, &rate)| rate > 0.001)
         .map(|(name, _)| name.clone());
 
-    // Map dominant adapter to config names for profile override
     let detected_adapter_configs = dominant_adapter
         .as_ref()
         .and_then(|name| {
@@ -310,14 +386,22 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         })
         .unwrap_or_default();
 
+    // Compute aggregate 3' and internal adapter rates across all families
+    let total_3prime: usize = adapter_3prime_hits.values().sum();
+    let total_internal: usize = adapter_internal_hits.values().sum();
+    let adapter_3prime_rate = total_3prime as f64 / total_reads as f64;
+    let adapter_internal_rate = total_internal as f64 / total_reads as f64;
+
     // Estimate total reads from file size
     let estimated_read_count = estimate_read_count(r1_path, total_reads, total_bases);
 
-    // Compute complexity percentiles for data-driven threshold setting
+    // Compute complexity percentiles
     complexity_scores.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
     let complexity_p2 = percentile_sorted(&complexity_scores, 0.02);
     let complexity_p5 = percentile_sorted(&complexity_scores, 0.05);
     let complexity_median = percentile_sorted(&complexity_scores, 0.50);
+
+    let quality_profile = pos_quality.means();
 
     let quick_scan = QuickScanStats {
         reads_scanned: total_reads,
@@ -333,6 +417,12 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         complexity_p2,
         complexity_p5,
         complexity_median,
+        quality_profile,
+        adapter_3prime_rate,
+        adapter_internal_rate,
+        r2_mean_quality,
+        r2_quality_profile,
+        r2_quality_delta,
     };
 
     let reads = ReadInfo {
@@ -350,7 +440,6 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     let mut warnings = Vec::new();
 
     if let Some(ref plat) = platform {
-        // Poly-G
         if plat.has_poly_g_risk() {
             recommendations.push(Recommendation {
                 parameter: "polyx.platform_aware".into(),
@@ -362,7 +451,6 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
             });
         }
 
-        // Optical dup distance
         if plat.patterned_flowcell {
             recommendations.push(Recommendation {
                 parameter: "dedup.optical_distance".into(),
@@ -374,7 +462,6 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
             });
         }
 
-        // Q-score binning
         if let Some(bins) = plat.quality_bins {
             warnings.push(format!(
                 "{} uses {}-bin Q-score quantization: quality values are approximate",
@@ -387,7 +474,7 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     if read_length <= 100 {
         recommendations.push(Recommendation {
             parameter: "quality.min_length".into(),
-            value: format!("{}", read_length * 2 / 5), // ~40% of read length
+            value: format!("{}", read_length * 2 / 5),
             reason: format!(
                 "Short reads ({read_length}bp): lower min_length threshold recommended"
             ),
@@ -429,6 +516,14 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         }
     }
 
+    // Internal adapter chimera warning (library prep signature)
+    if adapter_internal_rate > 0.005 {
+        warnings.push(format!(
+            "Internal adapter chimeras detected ({:.2}%): typical for ligation-based library preps",
+            adapter_internal_rate * 100.0
+        ));
+    }
+
     // GC content warnings
     if mean_gc < 0.30 {
         warnings.push(format!(
@@ -447,12 +542,78 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
         warnings.push("Phred+64 quality encoding detected: old Illumina format".into());
     }
 
+    // Quality profile shape warning: detect severe 3' degradation
+    let qp = &quick_scan.quality_profile;
+    if qp.len() >= 2 {
+        let q_start = qp[0];
+        let q_end = qp[qp.len() - 1];
+        let q_drop = q_start - q_end;
+        if q_drop > 10.0 {
+            warnings.push(format!(
+                "Severe 3' quality degradation: Q{:.0} at start, Q{:.0} at end (drop of {:.0})",
+                q_start, q_end, q_drop
+            ));
+        }
+    }
+
+    // R2 quality warnings
+    if let Some(delta) = quick_scan.r2_quality_delta {
+        if delta < -5.0 {
+            warnings.push(format!(
+                "R2 quality is {:.1} Phred points lower than R1: expect higher singleton rate",
+                -delta
+            ));
+        }
+    }
+
     Ok(IngestResult {
         platform,
         reads,
         quick_scan,
         recommendations,
         warnings,
+    })
+}
+
+/// R2 scan results
+struct R2ScanResult {
+    mean_quality: Option<f64>,
+    quality_profile: Option<Vec<f64>>,
+    quality_delta: Option<f64>,
+}
+
+/// Quick scan of R2 file: compute mean quality and per-position profile
+fn scan_r2(r2_path: &Path, max_reads: usize, r1_mean_quality: f64) -> Result<R2ScanResult> {
+    let stream = FastqStream::from_path(r2_path)?;
+    let mut total_quality = 0.0f64;
+    let mut count = 0usize;
+    let mut pos_quality = PositionQualityAccum::new(POSITION_BUCKETS);
+
+    for record in stream {
+        let record = record?;
+        total_quality += mean_quality(&record.quality);
+        pos_quality.add(&record.quality);
+        count += 1;
+        if count >= max_reads {
+            break;
+        }
+    }
+
+    if count == 0 {
+        return Ok(R2ScanResult {
+            mean_quality: None,
+            quality_profile: None,
+            quality_delta: None,
+        });
+    }
+
+    let r2_mean = total_quality / count as f64;
+    let delta = r2_mean - r1_mean_quality;
+
+    Ok(R2ScanResult {
+        mean_quality: Some(r2_mean),
+        quality_profile: Some(pos_quality.means()),
+        quality_delta: Some(delta),
     })
 }
 
@@ -472,12 +633,9 @@ fn estimate_read_count(path: &Path, scanned_reads: usize, scanned_bases: u64) ->
         return None;
     }
 
-    // Estimate: compressed bytes per base (from scan sample)
-    // FASTQ overhead: ~4 lines per read, quality = sequence length
-    // Rough: each read = 4 * read_length bytes uncompressed, ~0.4x compressed
     let avg_read_len = scanned_bases as f64 / scanned_reads as f64;
-    let uncompressed_per_read = avg_read_len * 2.5; // seq + qual + headers + newlines
-    let compression_ratio = 0.35; // typical gzip ratio for FASTQ
+    let uncompressed_per_read = avg_read_len * 2.5;
+    let compression_ratio = 0.35;
     let compressed_per_read = uncompressed_per_read * compression_ratio;
 
     Some((file_size as f64 / compressed_per_read) as u64)
@@ -504,6 +662,33 @@ mod tests {
         }
     }
 
+    fn write_test_fastq_degraded(
+        path: &Path,
+        instrument: &str,
+        num_reads: usize,
+        read_len: usize,
+    ) {
+        use std::io::Write;
+        let mut f = std::fs::File::create(path).unwrap();
+        for i in 0..num_reads {
+            let seq: String = (0..read_len)
+                .map(|j| ["A", "C", "G", "T"][(i + j) % 4])
+                .collect();
+            // Quality degrades from I (Q40) at start to 5 (Q20) at end
+            let qual: String = (0..read_len)
+                .map(|j| {
+                    let frac = j as f64 / read_len as f64;
+                    let q = 40.0 - (frac * 20.0);
+                    (q as u8 + 33) as char
+                })
+                .collect();
+            writeln!(f, "@{instrument}:1:FC:1:1:{i}:1 1:N:0:ACGT").unwrap();
+            writeln!(f, "{seq}").unwrap();
+            writeln!(f, "+").unwrap();
+            writeln!(f, "{qual}").unwrap();
+        }
+    }
+
     #[test]
     fn test_ingest_novaseq_data() {
         let tmp = TempDir::new().unwrap();
@@ -521,6 +706,9 @@ mod tests {
         assert_eq!(result.reads.read_length, 150);
         assert!(!result.reads.paired);
         assert_eq!(result.reads.quality_offset, 33);
+
+        // Quality profile should have POSITION_BUCKETS entries
+        assert_eq!(result.quick_scan.quality_profile.len(), POSITION_BUCKETS);
     }
 
     #[test]
@@ -546,7 +734,6 @@ mod tests {
         let result = ingest_fastq(&path, None).unwrap();
 
         assert_eq!(result.reads.read_length, 75);
-        // Should recommend lower min_length for short reads
         assert!(
             result
                 .recommendations
@@ -566,5 +753,69 @@ mod tests {
 
         let result = ingest_fastq(&r1, Some(&r2)).unwrap();
         assert!(result.reads.paired);
+        assert!(result.quick_scan.r2_mean_quality.is_some());
+        assert!(result.quick_scan.r2_quality_profile.is_some());
+        // Same quality data -- delta should be ~0
+        let delta = result.quick_scan.r2_quality_delta.unwrap();
+        assert!(delta.abs() < 0.1, "Expected near-zero delta, got {delta}");
+    }
+
+    #[test]
+    fn test_quality_degradation_detection() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("test.fastq");
+        write_test_fastq_degraded(&path, "M01757", 100, 250);
+
+        let result = ingest_fastq(&path, None).unwrap();
+
+        let qp = &result.quick_scan.quality_profile;
+        // First bucket should be higher quality than last
+        assert!(qp[0] > qp[qp.len() - 1], "Quality should degrade 3' to 5'");
+        let drop = qp[0] - qp[qp.len() - 1];
+        assert!(drop > 15.0, "Expected >15 Phred drop, got {drop:.1}");
+
+        // Should generate a 3' degradation warning
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("3' quality degradation")),
+            "Should warn about 3' degradation"
+        );
+    }
+
+    #[test]
+    fn test_r2_quality_degradation() {
+        let tmp = TempDir::new().unwrap();
+        let r1 = tmp.path().join("R1.fastq");
+        let r2 = tmp.path().join("R2.fastq");
+        write_test_fastq(&r1, "A00882", 100, 150); // high quality R1
+        write_test_fastq_degraded(&r2, "A00882", 100, 150); // degraded R2
+
+        let result = ingest_fastq(&r1, Some(&r2)).unwrap();
+
+        let delta = result.quick_scan.r2_quality_delta.unwrap();
+        assert!(delta < -5.0, "R2 should be >5 Phred worse than R1, got {delta:.1}");
+
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("R2 quality")),
+            "Should warn about R2 quality"
+        );
+    }
+
+    #[test]
+    fn test_adapter_rate_separation() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("test.fastq");
+        write_test_fastq(&path, "A00882", 100, 150);
+
+        let result = ingest_fastq(&path, None).unwrap();
+
+        // With synthetic data, adapter rates should be 0
+        assert_eq!(result.quick_scan.adapter_3prime_rate, 0.0);
+        assert_eq!(result.quick_scan.adapter_internal_rate, 0.0);
     }
 }

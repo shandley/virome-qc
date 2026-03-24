@@ -32,6 +32,11 @@ pub struct HostFilter {
     host_removed: AtomicU64,
     /// Ambiguous reads flagged
     ambiguous_flagged: AtomicU64,
+    /// Containment distribution histogram: 10 bins (0-10%, 10-20%, ..., 90-100%)
+    /// Only counts reads with containment > 0 (skips the vast majority at 0%)
+    containment_hist: [AtomicU64; 10],
+    /// Reads with zero containment
+    zero_containment: AtomicU64,
 }
 
 impl HostFilter {
@@ -53,6 +58,8 @@ impl HostFilter {
             stats: AtomicStats::new(),
             host_removed: AtomicU64::new(0),
             ambiguous_flagged: AtomicU64::new(0),
+            containment_hist: std::array::from_fn(|_| AtomicU64::new(0)),
+            zero_containment: AtomicU64::new(0),
         })
     }
 
@@ -168,6 +175,14 @@ impl QcModule for HostFilter {
 
         let containment = self.containment(seq);
 
+        // Record containment distribution
+        if containment > 0.0 {
+            let bin = ((containment * 10.0) as usize).min(9);
+            self.containment_hist[bin].fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.zero_containment.fetch_add(1, Ordering::Relaxed);
+        }
+
         if containment >= self.host_threshold {
             record.fail("host");
             self.host_removed.fetch_add(1, Ordering::Relaxed);
@@ -179,6 +194,12 @@ impl QcModule for HostFilter {
     }
 
     fn report(&self) -> ModuleReport {
+        let hist: Vec<u64> = self
+            .containment_hist
+            .iter()
+            .map(|c| c.load(Ordering::Relaxed))
+            .collect();
+
         self.stats.to_report(
             self.name(),
             serde_json::json!({
@@ -186,6 +207,12 @@ impl QcModule for HostFilter {
                 "ambiguous_flagged": self.ambiguous_flagged.load(Ordering::Relaxed),
                 "host_threshold": self.host_threshold,
                 "ambiguous_threshold": self.ambiguous_threshold,
+                "containment_distribution": {
+                    "bins": ["0-10%", "10-20%", "20-30%", "30-40%", "40-50%",
+                             "50-60%", "60-70%", "70-80%", "80-90%", "90-100%"],
+                    "counts": hist,
+                    "zero_containment": self.zero_containment.load(Ordering::Relaxed),
+                },
             }),
         )
     }
@@ -205,18 +232,25 @@ fn resolve_filter_path(reference: &str) -> Result<std::path::PathBuf, anyhow::Er
     }
 
     // Check standard locations
-    let standard_locations = [
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut standard_locations = vec![
         // Relative to current directory
         format!("{}.sbf", reference),
         // In a databases subdirectory
         format!("databases/host/{}.sbf", reference),
+        // Common naming variants
+        format!("benchmark_data/references/{}.sbf", reference),
+        format!("benchmark_data/references/{}_t2t.sbf", reference),
         // Home directory
-        format!(
-            "{}/.virome-qc/host/{}.sbf",
-            std::env::var("HOME").unwrap_or_default(),
-            reference
-        ),
+        format!("{}/.virome-qc/host/{}.sbf", home, reference),
+        format!("{}/.virome-qc/host/{}_t2t.sbf", home, reference),
     ];
+
+    // Also check VIROME_QC_DB environment variable
+    if let Ok(db_dir) = std::env::var("VIROME_QC_DB") {
+        standard_locations.push(format!("{}/{}.sbf", db_dir, reference));
+        standard_locations.push(format!("{}/{}_t2t.sbf", db_dir, reference));
+    }
 
     for loc in &standard_locations {
         let p = std::path::PathBuf::from(loc);
@@ -268,6 +302,8 @@ mod tests {
             stats: AtomicStats::new(),
             host_removed: AtomicU64::new(0),
             ambiguous_flagged: AtomicU64::new(0),
+            containment_hist: std::array::from_fn(|_| AtomicU64::new(0)),
+            zero_containment: AtomicU64::new(0),
         };
 
         // A read from the reference should have high containment
@@ -314,6 +350,8 @@ mod tests {
             stats: AtomicStats::new(),
             host_removed: AtomicU64::new(0),
             ambiguous_flagged: AtomicU64::new(0),
+            containment_hist: std::array::from_fn(|_| AtomicU64::new(0)),
+            zero_containment: AtomicU64::new(0),
         };
 
         // Host read

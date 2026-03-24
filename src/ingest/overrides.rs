@@ -71,6 +71,15 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
         }
     }
 
+    // Enable internal adapter scanning if ingestion detected chimeras.
+    // Threshold set at 1% because TruSeq adapter k-mers share genuine
+    // homology with viral genomes, producing a ~1.7% baseline FP rate
+    // at k=15 with 1-mismatch tolerance. Only auto-enable when the
+    // ingestion scan detects chimeras above this baseline.
+    if ingest.quick_scan.adapter_internal_rate > 0.01 && !profile.modules.adapter.internal_scan {
+        profile.modules.adapter.internal_scan = true;
+    }
+
     // Auto-detect adapter sequences from scan data.
     // If ingestion found a dominant adapter family, override the profile's adapter config.
     if !ingest.quick_scan.detected_adapter_configs.is_empty() {
@@ -89,11 +98,13 @@ pub fn apply_overrides(mut profile: ProfileConfig, ingest: &IngestResult) -> Pro
     // Use the 2nd percentile of observed complexity scores as the threshold:
     // this removes only the extreme low-complexity tail while preserving
     // reads that are normal for this specific sample.
+    //
+    // ROC analysis (ViroForge entropy spectrum sweep) shows optimal threshold
+    // at 0.40 (F1=0.997). Upper clamp at 0.50 prevents overshoot into
+    // low-sensitivity zone on unusual samples.
     let p2 = ingest.quick_scan.complexity_p2;
     if p2 > 0.0 {
-        // Clamp to a reasonable range: at least 0.2 (catch true junk),
-        // at most 0.6 (don't over-filter)
-        let data_driven_threshold = p2.clamp(0.2, 0.6);
+        let data_driven_threshold = p2.clamp(0.2, 0.50);
         profile.modules.complexity.min_entropy = data_driven_threshold;
     }
 
@@ -155,6 +166,12 @@ mod tests {
                 complexity_p2: 0.45,
                 complexity_p5: 0.55,
                 complexity_median: 0.85,
+                quality_profile: vec![35.0; 10],
+                adapter_3prime_rate: 0.0,
+                adapter_internal_rate: 0.0,
+                r2_mean_quality: None,
+                r2_quality_profile: None,
+                r2_quality_delta: None,
             },
             recommendations: vec![],
             warnings: vec![],

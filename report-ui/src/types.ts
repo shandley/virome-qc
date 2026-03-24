@@ -14,6 +14,47 @@ export interface Passport {
   quality_tier: "PASS" | "WARN" | "FAIL";
   qa_stats?: AnalyticsSnapshot;
   provenance?: Provenance;
+  ingestion?: Record<string, unknown>;
+  parameters?: Record<string, unknown>;
+  erv_analysis?: ErvAnalysis;
+  contamination_summary?: {
+    biological_contamination_removed: number;
+    biological_contamination_fraction: number;
+    technical_artifacts_removed: number;
+    technical_artifacts_fraction: number;
+    total_removed: number;
+    total_removed_fraction: number;
+  };
+}
+
+export interface ErvAnalysis {
+  retroviral_reads_flagged: number;
+  retroviral_reads_collected: number;
+  clusters_total: number;
+  classifications: {
+    endogenous: number;
+    ambiguous: number;
+    exogenous: number;
+  };
+  loci: ErvLocus[];
+}
+
+export interface ErvLocus {
+  cluster_id: number;
+  reads: number;
+  best_match: string;
+  classification: "Endogenous" | "Ambiguous" | "Exogenous";
+  combined_score: number;
+  cpg_ratio: number;
+  cpg_score: number;
+  orf_intact: number;
+  orf_score: number;
+  minhash_score: number;
+  dist_erv: number;
+  dist_exo: number;
+  nearest_erv: string;
+  nearest_exo: string;
+  depth_ratio: number;
 }
 
 export interface ModuleReport {

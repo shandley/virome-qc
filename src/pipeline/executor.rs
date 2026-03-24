@@ -6,9 +6,9 @@
 
 use crate::config::{ProfileConfig, Thresholds};
 use crate::modules::{
-    AdapterTrimmer, AnalyticsSnapshot, ComplexityFilter, ContaminantScreener, HostFilter,
-    LengthFilter, MergeConfig, MergeResult, ModuleReport, NFilter, PolyXTrimmer, QcModule,
-    QualityTrimmer, ReadAnalytics, ReadMerger, StreamingDedup,
+    AdapterTrimmer, AnalyticsSnapshot, ComplexityFilter, ContaminantScreener, ErvScreener,
+    HostFilter, LengthFilter, MergeConfig, MergeResult, ModuleReport, NFilter, PolyXTrimmer,
+    QcModule, QualityTrimmer, ReadAnalytics, ReadMerger, RrnaFilter, StreamingDedup,
 };
 use crate::pipeline::record::AnnotatedRecord;
 use crate::report::Passport;
@@ -37,6 +37,10 @@ pub struct PipelineResult {
     pub qa_stats: Option<AnalyticsSnapshot>,
     /// Input file provenance
     pub provenance: Option<crate::report::passport::Provenance>,
+    /// Ingestion scan results (platform detection, sample characterization)
+    pub ingestion: Option<crate::ingest::scan::IngestResult>,
+    /// Final applied module configuration (after all overrides)
+    pub applied_config: Option<crate::config::ProfileConfig>,
 }
 
 impl PipelineResult {
@@ -149,6 +153,8 @@ impl Pipeline {
             thresholds: self.config.thresholds.clone(),
             qa_stats: Some(qa.snapshot()),
             provenance: Some(provenance),
+            ingestion: None,
+            applied_config: None,
         })
     }
 
@@ -288,6 +294,8 @@ impl Pipeline {
             thresholds: self.config.thresholds.clone(),
             qa_stats: Some(qa.snapshot()),
             provenance: Some(provenance),
+            ingestion: None,
+            applied_config: None,
         })
     }
 
@@ -333,7 +341,7 @@ impl Pipeline {
                     matches!(
                         &ann.disposition,
                         crate::pipeline::Disposition::Fail(reason)
-                            if reason.starts_with("contaminant_") || reason == "host" || reason == "pcr_duplicate"
+                            if reason.starts_with("contaminant_") || reason == "host" || reason == "rrna" || reason == "pcr_duplicate"
                     )
                 }
                 if is_concordant_fail(&ann_r1) && !ann_r2.is_failed() {
@@ -648,12 +656,38 @@ impl Pipeline {
             modules.push(Box::new(StreamingDedup::new(&cfg.dedup)));
         }
 
-        // 7. Contaminant screening — rRNA, PhiX, vectors (Phase 2)
+        // 7. Contaminant screening — PhiX, vectors, and optionally rRNA (consensus k-mers)
         if cfg.contaminant.enabled {
-            modules.push(Box::new(ContaminantScreener::new(&cfg.contaminant)));
+            // If the dedicated SILVA rRNA module is active, disable the consensus
+            // rRNA screening in the contaminant module to avoid double-counting
+            let rrna_module_active = cfg
+                .rrna
+                .as_ref()
+                .map(|r| r.enabled)
+                .unwrap_or(false);
+            if rrna_module_active && cfg.contaminant.screen_rrna {
+                let mut contam_cfg = cfg.contaminant.clone();
+                contam_cfg.screen_rrna = false;
+                modules.push(Box::new(ContaminantScreener::new(&contam_cfg)));
+            } else {
+                modules.push(Box::new(ContaminantScreener::new(&cfg.contaminant)));
+            }
         }
 
-        // 7. Host depletion — Super Bloom k-mer containment (Phase 3)
+        // 7b. rRNA screening — SILVA k-mer filter (high-sensitivity, optional)
+        if let Some(ref rrna_cfg) = cfg.rrna {
+            if rrna_cfg.enabled {
+                match RrnaFilter::from_filter_file(rrna_cfg) {
+                    Ok(filter) => modules.push(Box::new(filter)),
+                    Err(e) => {
+                        log::warn!("rRNA screening disabled: {}", e);
+                        eprintln!("  Warning: rRNA filter not available: {}", e);
+                    }
+                }
+            }
+        }
+
+        // 8. Host depletion — Super Bloom k-mer containment (Phase 3)
         if cfg.host.enabled {
             match HostFilter::from_filter_file(&cfg.host) {
                 Ok(filter) => modules.push(Box::new(filter)),
@@ -664,10 +698,20 @@ impl Pipeline {
             }
         }
 
-        // 8. Final length filter — catch reads shortened by cumulative trimming
-        if cfg.quality.enabled {
-            modules.push(Box::new(LengthFilter::new(cfg.quality.min_length)));
-        }
+        // 9b. ERV analysis — flag reads with retroviral k-mer content
+        // Runs after host depletion so it only screens surviving reads.
+        // Flags reads (does not remove) for downstream ERV classification.
+        modules.push(Box::new(ErvScreener::new()));
+
+        // 10. Final length filter — catch reads shortened by cumulative trimming
+        // Always runs as a safety net, even if quality module is disabled.
+        // Adapter and poly-X trimming can shorten reads below usable length.
+        let min_length = if cfg.quality.enabled {
+            cfg.quality.min_length
+        } else {
+            30 // reasonable minimum even without quality module
+        };
+        modules.push(Box::new(LengthFilter::new(min_length)));
 
         Ok(modules)
     }
