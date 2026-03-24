@@ -14,8 +14,6 @@
 #
 # Or run individual sample: sbatch run_benchmark.sh <sample_index>
 
-set -e
-
 WORKDIR="/scratch/sahlab/shandley/virome-qc-benchmark"
 SRCDIR="$WORKDIR/src/virome-qc"
 VIROME_QC="$SRCDIR/target/release/virome-qc"
@@ -23,8 +21,14 @@ DBDIR="$WORKDIR/databases"
 RESULTS="$WORKDIR/results"
 TMPDIR_BASE="$WORKDIR/tmp"
 
-source ~/.cargo/env 2>/dev/null
-source /ref/sahlab/software/miniforge3/bin/activate virome-qc-bench 2>/dev/null
+# Activate environments (don't use set -e here, conda activate can return non-zero)
+source ~/.cargo/env 2>/dev/null || true
+eval "$(conda shell.bash hook)" 2>/dev/null || source /ref/sahlab/software/miniforge3/bin/activate 2>/dev/null || true
+conda activate virome-qc-bench 2>/dev/null || source /ref/sahlab/software/miniforge3/bin/activate virome-qc-bench 2>/dev/null || true
+export PATH="/ref/sahlab/software/scott_conda/virome-qc-bench/bin:$PATH"
+
+# Now enable strict mode
+set -e
 
 mkdir -p "$RESULTS" "$TMPDIR_BASE" logs
 
