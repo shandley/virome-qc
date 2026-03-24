@@ -183,6 +183,25 @@ pub struct Thresholds {
     /// Deviation beyond this range triggers a WARN flag
     #[serde(default)]
     pub expected_gc_range: Option<(f64, f64)>,
+    /// Expected QC metric ranges derived from ViroForge reference datasets.
+    /// Used in reports to show user metrics in context ("typical for this sample type").
+    #[serde(default)]
+    pub expected_ranges: Option<ExpectedRanges>,
+}
+
+/// Expected QC metric ranges for a sample type, derived from ViroForge reference data.
+/// All values are fractions (0.0-1.0).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpectedRanges {
+    /// Expected survival rate range [min, max]
+    pub survival: (f64, f64),
+    /// Expected host fraction range [min, max]
+    pub host_fraction: (f64, f64),
+    /// Expected rRNA fraction range [min, max]
+    pub rrna_fraction: (f64, f64),
+    /// Expected adapter rate range [min, max]
+    #[serde(default)]
+    pub adapter_rate: Option<(f64, f64)>,
 }
 
 // Default value functions for serde
@@ -363,6 +382,12 @@ impl Profile {
                 max_rrna_fraction: 0.05,
                 max_duplicate_rate: 0.50,
                 expected_gc_range: Some((0.35, 0.55)),
+                expected_ranges: Some(ExpectedRanges {
+                    survival: (0.95, 0.999),
+                    host_fraction: (0.0, 0.005),
+                    rrna_fraction: (0.001, 0.02),
+                    adapter_rate: Some((0.001, 0.06)),
+                }),
             },
         }
     }
@@ -433,6 +458,12 @@ impl Profile {
                 max_rrna_fraction: 0.10,
                 max_duplicate_rate: 0.50,
                 expected_gc_range: Some((0.35, 0.55)),
+                expected_ranges: Some(ExpectedRanges {
+                    survival: (0.10, 0.50),
+                    host_fraction: (0.20, 0.80),
+                    rrna_fraction: (0.001, 0.10),
+                    adapter_rate: Some((0.01, 0.30)),
+                }),
             },
         }
     }
@@ -503,6 +534,12 @@ impl Profile {
                 max_rrna_fraction: 0.15,
                 max_duplicate_rate: 0.50,
                 expected_gc_range: Some((0.40, 0.65)),
+                expected_ranges: Some(ExpectedRanges {
+                    survival: (0.80, 0.999),
+                    host_fraction: (0.0, 0.06),
+                    rrna_fraction: (0.001, 0.10),
+                    adapter_rate: Some((0.001, 0.06)),
+                }),
             },
         }
     }
@@ -575,6 +612,12 @@ impl Profile {
                 max_rrna_fraction: 0.10,
                 max_duplicate_rate: 0.70, // high duplication expected with WGA
                 expected_gc_range: Some((0.35, 0.55)),
+                expected_ranges: Some(ExpectedRanges {
+                    survival: (0.50, 0.95),
+                    host_fraction: (0.001, 0.10),
+                    rrna_fraction: (0.001, 0.05),
+                    adapter_rate: Some((0.01, 0.10)),
+                }),
             },
         }
     }

@@ -40,18 +40,53 @@ Built on [biometal](https://github.com/shandley/biometal) for NEON-optimized seq
 
 ## Installation
 
-Requires Rust 1.75+ and a local copy of [biometal](https://github.com/shandley/biometal).
+Requires Rust 1.75+ and local copies of [biometal](https://github.com/shandley/biometal) and [SuperBloom](https://github.com/shandley/SuperBloom).
 
 ```bash
+# Clone all three repositories
+git clone https://github.com/shandley/biometal.git
+git clone https://github.com/shandley/SuperBloom.git
 git clone https://github.com/shandley/virome-qc.git
-cd virome-qc
 
-# Update Cargo.toml to point biometal path to your local copy
-# Then build:
+# Update Cargo.toml paths to point to your local copies
+cd virome-qc
+# Edit biometal and superbloom paths in Cargo.toml
+
+# Build
 cargo build --release
 ```
 
 The binary will be at `target/release/virome-qc`.
+
+## Quickstart
+
+**5 minutes from install to first report:**
+
+```bash
+# 1. Build reference databases (one-time, ~30 min)
+#    Downloads SILVA rRNA + T2T-CHM13 human genome and builds filters
+virome-qc db --setup
+
+# 2. Run QC on your virome FASTQ files
+virome-qc run \
+  -p stool-vlp-tagmentation \
+  -1 sample_R1.fastq.gz -2 sample_R2.fastq.gz \
+  -i . --merge \
+  -o results/ \
+  -t 8
+
+# 3. View the report
+open results/report.html
+```
+
+That's it. The ingestion engine auto-detects your platform, adapters, and quality profile. All 11 QC modules run automatically. The output includes:
+
+- `results/clean_R1.fastq.gz` / `clean_R2.fastq.gz` — QC-passed reads
+- `results/merged.fastq.gz` — merged overlapping pairs
+- `results/passport.json` — comprehensive QC analytics
+- `results/report.html` — interactive HTML dashboard
+
+Use `--report-only` to generate just the passport and report without writing clean FASTQ output (useful for QC assessment without disk overhead).
 
 ## Quick start
 

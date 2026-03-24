@@ -6,7 +6,7 @@
 mod profiles;
 
 pub use profiles::{
-    AdapterConfig, ChimeraConfig, ComplexityConfig, ContaminantConfig, DedupConfig, HostConfig,
-    ModuleConfigs, Platform, PolyXConfig, Profile, ProfileConfig, QualityConfig, RrnaConfig,
-    Thresholds,
+    AdapterConfig, ChimeraConfig, ComplexityConfig, ContaminantConfig, DedupConfig,
+    ExpectedRanges, HostConfig, ModuleConfigs, Platform, PolyXConfig, Profile, ProfileConfig,
+    QualityConfig, RrnaConfig, Thresholds,
 };

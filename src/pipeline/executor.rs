@@ -681,7 +681,9 @@ impl Pipeline {
                     Ok(filter) => modules.push(Box::new(filter)),
                     Err(e) => {
                         log::warn!("rRNA screening disabled: {}", e);
-                        eprintln!("  Warning: rRNA filter not available: {}", e);
+                        eprintln!("  Warning: rRNA screening disabled -- rRNA reads will not be removed");
+                        eprintln!("    Build with: virome-qc db --rrna");
+                        eprintln!("    Or set VIROME_QC_DB to directory containing rrna_silva.rrf");
                     }
                 }
             }
@@ -693,7 +695,9 @@ impl Pipeline {
                 Ok(filter) => modules.push(Box::new(filter)),
                 Err(e) => {
                     log::warn!("Host depletion disabled: {}", e);
-                    eprintln!("  Warning: Host filter not available: {}", e);
+                    eprintln!("  Warning: Host depletion disabled -- host reads will not be removed");
+                    eprintln!("    Build with: virome-qc db --host <reference.fasta>");
+                    eprintln!("    Or set VIROME_QC_DB to directory containing human_t2t.sbf");
                 }
             }
         }

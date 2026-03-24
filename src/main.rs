@@ -142,6 +142,11 @@ enum Commands {
         /// Output path for the filter file
         #[arg(short, long, default_value = "host.sbf")]
         output: PathBuf,
+
+        /// Download and build all required databases (T2T human host + SILVA rRNA).
+        /// Files are stored in ~/.virome-qc/ for auto-discovery.
+        #[arg(long)]
+        setup: bool,
     },
 
     /// Generate report from existing passport files
@@ -466,7 +471,99 @@ fn main() -> Result<()> {
             std::fs::write(&stats_path, stats_json)?;
             println!("\nStats written to: {}", stats_path.display());
         }
-        Commands::Db { host, rrna, output } => {
+        Commands::Db {
+            host,
+            rrna,
+            output,
+            setup,
+        } => {
+            if setup {
+                // Auto-setup: download T2T human genome + SILVA, build both filters
+                let db_dir = std::env::var("HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(".virome-qc");
+                std::fs::create_dir_all(&db_dir)?;
+
+                println!("=== virome-qc database setup ===");
+                println!("Installing to: {}", db_dir.display());
+                println!();
+
+                // Build rRNA filter
+                let rrna_path = db_dir.join("rrna").join("silva.rrf");
+                if rrna_path.exists() {
+                    println!("rRNA filter already exists: {}", rrna_path.display());
+                } else {
+                    println!("--- Building SILVA rRNA filter ---");
+                    std::fs::create_dir_all(rrna_path.parent().unwrap())?;
+                    // Trigger the same auto-download logic as --rrna with no args
+                    let rrna_dir = rrna_path.parent().unwrap();
+                    let ssu_url = "https://www.arb-silva.de/fileadmin/silva_databases/release_138.2/Exports/SILVA_138.2_SSURef_NR99_tax_silva_trunc.fasta.gz";
+                    let lsu_url = "https://www.arb-silva.de/fileadmin/silva_databases/release_138.2/Exports/SILVA_138.2_LSURef_NR99_tax_silva_trunc.fasta.gz";
+                    let ssu_file = rrna_dir.join("SILVA_SSU.fasta.gz");
+                    let lsu_file = rrna_dir.join("SILVA_LSU.fasta.gz");
+
+                    for (url, dest) in [(ssu_url, &ssu_file), (lsu_url, &lsu_file)] {
+                        if !dest.exists() {
+                            println!("  Downloading {}...", dest.file_name().unwrap().to_string_lossy());
+                            let status = std::process::Command::new("curl")
+                                .args(["-L", "-o", &dest.to_string_lossy(), url])
+                                .status()?;
+                            if !status.success() {
+                                anyhow::bail!("Failed to download SILVA");
+                            }
+                        }
+                    }
+
+                    virome_qc::modules::rrna::RrnaFilter::build_filter(
+                        &[ssu_file.as_path(), lsu_file.as_path()],
+                        &rrna_path,
+                    )?;
+                    println!("  rRNA filter: {}", rrna_path.display());
+                }
+
+                // Build host filter
+                let host_path = db_dir.join("host").join("human_t2t.sbf");
+                if host_path.exists() {
+                    println!("Host filter already exists: {}", host_path.display());
+                } else {
+                    println!();
+                    println!("--- Building T2T-CHM13 host filter ---");
+                    std::fs::create_dir_all(host_path.parent().unwrap())?;
+                    let host_dir = host_path.parent().unwrap();
+                    let t2t_url = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/009/914/755/GCF_009914755.1_T2T-CHM13v2.0/GCF_009914755.1_T2T-CHM13v2.0_genomic.fna.gz";
+                    let t2t_gz = host_dir.join("t2t_chm13.fna.gz");
+                    let t2t_fna = host_dir.join("t2t_chm13.fna");
+
+                    if !t2t_fna.exists() {
+                        println!("  Downloading T2T-CHM13 (~890 MB)...");
+                        let status = std::process::Command::new("curl")
+                            .args(["-L", "-o", &t2t_gz.to_string_lossy(), t2t_url])
+                            .status()?;
+                        if !status.success() {
+                            anyhow::bail!("Failed to download T2T-CHM13");
+                        }
+                        println!("  Decompressing...");
+                        let status = std::process::Command::new("gunzip")
+                            .arg(&t2t_gz)
+                            .status()?;
+                        if !status.success() {
+                            anyhow::bail!("Failed to decompress T2T-CHM13");
+                        }
+                    }
+
+                    virome_qc::modules::host::HostFilter::build_filter(&t2t_fna, &host_path)?;
+                    // Clean up uncompressed FASTA
+                    let _ = std::fs::remove_file(&t2t_fna);
+                    println!("  Host filter: {}", host_path.display());
+                }
+
+                println!();
+                println!("=== Setup complete ===");
+                println!("Filters installed to: {}", db_dir.display());
+                println!("virome-qc will auto-discover these filters on future runs.");
+                return Ok(());
+            }
             if let Some(ref rrna_paths) = rrna {
                 let rrna_output = if output.to_string_lossy() == "host.sbf" {
                     std::path::PathBuf::from("rrna.rrf")
@@ -572,7 +669,11 @@ fn main() -> Result<()> {
                 input.clone()
             };
             let contents = std::fs::read_to_string(&passport_path)?;
-            let passport: virome_qc::Passport = serde_json::from_str(&contents)?;
+            let mut passport: virome_qc::Passport = serde_json::from_str(&contents)?;
+
+            // Recompute flags using latest logic (handles passports from older code)
+            passport.recompute_flags();
+
             virome_qc::report::generate_html_report(&passport, &output)?;
             println!("Report written to: {}", output.display());
         }
