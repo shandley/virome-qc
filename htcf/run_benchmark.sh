@@ -41,8 +41,8 @@ DATASETS=(
     "4|santos_nextera|SRR8487034|PE|stool-vlp-tagmentation|"
     "5|buddle_wgs|ERR13480651|SE|profiles/short-read-nebnext.yaml|"
     "6|buddle_rna|ERR13480663|SE|profiles/short-read-nebnext.yaml|"
-    "7|zhang_undepleted|SRR33419012|PE|profiles/short-read-nebnext.yaml|-X 1000000"
-    "8|zhang_depleted|SRR33419066|PE|profiles/short-read-nebnext.yaml|-X 1000000"
+    "7|zhang_undepleted|SRR33419012|PE|profiles/short-read-nebnext.yaml|"
+    "8|zhang_depleted|SRR33419066|PE|profiles/short-read-nebnext.yaml|"
     "9|tara_ocean|ERR599370|PE|profiles/short-read-nebnext.yaml|"
     "10|chrisman_dnbseq|ERR9765742|SE|profiles/short-read-nebnext.yaml|"
     "11|tisza_wastewater|SRR24403399|PE|profiles/short-read-nebnext.yaml|"
@@ -82,14 +82,7 @@ mkdir -p "$TMPDIR"
 echo "--- Downloading $ACCESSION ---"
 cd "$TMPDIR"
 
-if [ -n "$EXTRA" ]; then
-    # Use fastq-dump when extra args are needed (e.g., -X for read limit)
-    echo "  Using fastq-dump with extra args: $EXTRA"
-    fastq-dump "$ACCESSION" --split-files --gzip --clip $EXTRA --outdir "$TMPDIR" 2>&1 | tail -3
-    R1="$TMPDIR/${ACCESSION}_1.fastq.gz"
-    R2="$TMPDIR/${ACCESSION}_2.fastq.gz"
-    if [ ! -f "$R2" ]; then R2=""; fi
-elif [ "$PAIRED" = "PE" ]; then
+if [ "$PAIRED" = "PE" ]; then
     fasterq-dump "$ACCESSION" --split-files --threads 4 --temp "$TMPDIR" 2>&1 | tail -5
     # Compress
     pigz -p 4 "${ACCESSION}_1.fastq" "${ACCESSION}_2.fastq" 2>/dev/null || \
