@@ -82,22 +82,36 @@ mkdir -p "$TMPDIR"
 echo "--- Downloading $ACCESSION ---"
 cd "$TMPDIR"
 
+# Prefetch SRA data first (handles network issues)
+echo "  Prefetching..."
+prefetch "$ACCESSION" --max-size 100G -O "$TMPDIR" 2>&1 | tail -3
+
 if [ "$PAIRED" = "PE" ]; then
-    fasterq-dump "$ACCESSION" --split-files --threads 4 --temp "$TMPDIR" 2>&1 | tail -5
+    fasterq-dump "$TMPDIR/$ACCESSION/$ACCESSION.sra" --split-files --threads 4 --temp "$TMPDIR" --outdir "$TMPDIR" 2>&1 | tail -5
+    # Fallback: try accession directly if .sra file not found
+    if [ ! -f "$TMPDIR/${ACCESSION}_1.fastq" ]; then
+        fasterq-dump "$ACCESSION" --split-files --threads 4 --temp "$TMPDIR" --outdir "$TMPDIR" 2>&1 | tail -5
+    fi
     # Compress
-    pigz -p 4 "${ACCESSION}_1.fastq" "${ACCESSION}_2.fastq" 2>/dev/null || \
-    gzip "${ACCESSION}_1.fastq" "${ACCESSION}_2.fastq"
+    pigz -p 4 "$TMPDIR/${ACCESSION}_1.fastq" "$TMPDIR/${ACCESSION}_2.fastq" 2>/dev/null || \
+    gzip "$TMPDIR/${ACCESSION}_1.fastq" "$TMPDIR/${ACCESSION}_2.fastq"
     R1="$TMPDIR/${ACCESSION}_1.fastq.gz"
     R2="$TMPDIR/${ACCESSION}_2.fastq.gz"
 else
-    fasterq-dump "$ACCESSION" --threads 4 --temp "$TMPDIR" 2>&1 | tail -5
+    fasterq-dump "$TMPDIR/$ACCESSION/$ACCESSION.sra" --threads 4 --temp "$TMPDIR" --outdir "$TMPDIR" 2>&1 | tail -5
+    if [ ! -f "$TMPDIR/${ACCESSION}_1.fastq" ] && [ ! -f "$TMPDIR/${ACCESSION}.fastq" ]; then
+        fasterq-dump "$ACCESSION" --threads 4 --temp "$TMPDIR" --outdir "$TMPDIR" 2>&1 | tail -5
+    fi
     # fasterq-dump may produce _1 even for SE
-    if [ -f "${ACCESSION}_1.fastq" ]; then
-        pigz -p 4 "${ACCESSION}_1.fastq" 2>/dev/null || gzip "${ACCESSION}_1.fastq"
+    if [ -f "$TMPDIR/${ACCESSION}_1.fastq" ]; then
+        pigz -p 4 "$TMPDIR/${ACCESSION}_1.fastq" 2>/dev/null || gzip "$TMPDIR/${ACCESSION}_1.fastq"
         R1="$TMPDIR/${ACCESSION}_1.fastq.gz"
-    else
-        pigz -p 4 "${ACCESSION}.fastq" 2>/dev/null || gzip "${ACCESSION}.fastq"
+    elif [ -f "$TMPDIR/${ACCESSION}.fastq" ]; then
+        pigz -p 4 "$TMPDIR/${ACCESSION}.fastq" 2>/dev/null || gzip "$TMPDIR/${ACCESSION}.fastq"
         R1="$TMPDIR/${ACCESSION}.fastq.gz"
+    else
+        echo "FAILED: no FASTQ files found after download"
+        exit 1
     fi
     R2=""
 fi
