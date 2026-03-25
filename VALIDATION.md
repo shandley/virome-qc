@@ -1138,18 +1138,24 @@ Same study (Santos-Medellin 2021), same soil VLP virome extract, different libra
 
 Nextera has **580x more rRNA** than KAPA from the same sample. Tagmentation chemistry captures small rRNA fragments that ligation-based KAPA excludes via size selection. KAPA was PhiX-spiked (virome-qc correctly detects and removes 30.6K spike-in reads). Both show ~0.001% host reads as expected for soil VLP with no human host. This comparison demonstrates virome-qc's ability to detect library-prep-specific quality issues that would otherwise contaminate downstream viral classification.
 
-### Updated Summary Table (with host + rRNA)
+### Final Tier 1 Summary (13 datasets, full runs, dedup + conservative merge)
 
-| Dataset | Reads In | Survival | Host % | rRNA % | Adapter % | ERV | GC |
-|---|---|---|---|---|---|---|---|
-| cook | 2.5M | 91.7% | 0.003% | 0.22% | 0.32% | 1 | 0.47 |
-| kleiner | 36.7M | 94.8% | 0.002% | 0.53% | 2.08% | 23 | 0.57 |
-| buddle_wgs | 5.0M | 22.7% | 27.0% | 0.07% | 67.9% | 2,746 | 0.40 |
-| buddle_rna | 5.0M | 33.8% | 49.3% | 0.15% | 30.2% | 1,926 | 0.49 |
-| zhang_undepleted | 2.0M | 2.6% | 0.001% | 95.2% | 0.11% | 2 | 0.53 |
-| zhang_depleted | 2.0M | 73.0% | 0.07% | 13.8% | 3.29% | 109 | 0.54 |
-| santos_kapa | 27.4M | 99.5% | 0.000% | 0.01% | 0.28% | 121 | 0.60 |
-| santos_nextera | 26.8M | 90.3% | 0.001% | 8.16% | 5.97% | 109 | 0.60 |
-| shkoporov_gut | 12.6M | 97.6% | 0.04% | 0.77% | 0.39% | 26 | 0.41 |
-| tara_ocean | 19.5M | 98.1% | 0.18% | 0.15% | 0.02% | 59 | 0.47 |
-| chrisman_dnbseq | 10.0M | 99.6% | 0.01% | 0.42% | 0.02% | 8 | 0.47 |
+All datasets processed with the final codebase on HTCF: dedup enabled by default, conservative merge with ambiguity detection, herpesvirus ERV exclusion, single-source flag logic. QC survival is the quality metric (excludes dedup from the denominator — dedup is a library characteristic, not a quality failure).
+
+| Dataset | Reads | QC Surv | Dedup | Host | rRNA | Merge | ERV | Tier |
+|---|---|---|---|---|---|---|---|---|
+| tara_ocean | 19.5M | 98.2% | 4.3% | 0.18% | 0.14% | 16.3% | 43 | PASS |
+| santos_kapa | 27.4M | 99.6% | 12.4% | 0.00% | 0.01% | 81.1% | 0 | WARN |
+| kleiner_mock | 36.7M | 94.4% | 12.7% | 0.00% | 0.28% | 54.1% | 0 | PASS |
+| chrisman_dnbseq | 70.8M | 99.6% | 21.8% | 0.01% | 0.25% | 0.0% | 13 | WARN |
+| hiv_gut_virome | 17.8M | 99.0% | 29.7% | 0.00% | 0.66% | 11.4% | 0 | WARN |
+| shkoporov_gut | 12.6M | 95.4% | 66.9% | 0.04% | 0.02% | 10.2% | 0 | WARN |
+| santos_nextera | 26.8M | 90.4% | 17.2% | 0.00% | 7.58% | 44.5% | 7 | WARN |
+| negativeome_blank | 1.4M | 98.5% | 69.2% | 0.05% | 0.02% | 38.6% | 0 | WARN |
+| cook_mock | 2.5M | 82.6% | 52.7% | 0.00% | 0.14% | 48.6% | 0 | WARN |
+| zhang_depleted | 20.0M | 76.6% | 34.9% | 0.04% | 4.02% | 49.6% | 753 | WARN |
+| buddle_rna | 19.1M | 33.2% | 40.9% | 22.28% | 0.08% | 0.0% | 3,270 | FAIL |
+| buddle_wgs | 23.0M | 21.0% | 8.0% | 21.90% | 0.06% | 0.0% | 7,310 | FAIL |
+| zhang_undepleted | 20.0M | 21.4% | 86.3% | 0.00% | 10.65% | 31.8% | 6 | FAIL |
+
+Key insight: **dedup reveals true library quality.** Shkoporov gut VLP appeared 97.6% clean without dedup but is actually 95.4% QC survival with 67% duplication (MDA amplification). The QC survival metric correctly reports data quality independent of library complexity. Only 3 datasets truly FAIL: Buddle WGS/RNA (host-dominated clinical) and Zhang undepleted (rRNA-dominated).

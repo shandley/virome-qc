@@ -23,7 +23,8 @@ virome-qc addresses all of these with a single, opinionated pipeline that produc
 - **Contaminant screening** for PhiX spike-in (with Microviridae exclusion) and cloning vectors
 - **rRNA screening** via SILVA-based sorted hash filter (165M k-mers, 78% sensitivity on diverse rRNA)
 - **Host depletion** via Super Bloom k-mer containment with three-way classification (host/ambiguous/keep)
-- **Paired-end support** with concordant mate handling, singleton output, and optional read merging
+- **Paired-end support** with concordant mate handling, singleton output, and conservative read merging (ambiguity-aware overlap detection)
+- **Streaming deduplication** with prefix-hash dedup and separate QC survival metric — dedup is reported as a library characteristic, not a quality failure
 - **Comprehensive analytics** including per-position quality, base composition, GC distribution, library complexity estimation (HyperLogLog), adapter breakdown, and insert size distribution
 - **Interactive HTML reports** using React + shadcn/ui + Recharts with Catppuccin theme and dark mode
 - **Ingestion engine** that auto-detects platform, adapters, Q-score binning, per-position quality profile, and R2 quality degradation from the first 50K reads
@@ -175,15 +176,17 @@ The ordering is intentional. Adapters must be removed first (non-biological sequ
 
 Every run produces a `passport.json` containing:
 
-- **Summary**: reads in/out, survival rate, bases in/out
+- **Summary**: reads in/out, unique reads (after dedup), QC survival rate, bases in/out
+- **QC survival vs total survival**: QC survival measures the quality of unique reads (excludes dedup from the denominator). A sample with 67% duplication from MDA amplification can still have 95% QC survival — the library complexity is low but the data quality is good.
 - **Per-module reports**: reads processed, removed, modified, and bases removed by each module
+- **Contamination summary**: biological contamination (host + rRNA + contaminant) vs technical artifacts (adapter + quality + complexity), with dedup reported separately as a library characteristic
 - **Per-position quality**: mean, median, Q25, Q75 at each read position (before and after QC)
 - **Per-position base composition**: A/C/G/T/N fractions at each position (before and after QC)
 - **Distributions**: read length, GC content, quality scores, insert sizes, trimmed bases
 - **Adapter breakdown**: counts by adapter type (TruSeq, Nextera, NEBNext, internal)
 - **Duplication estimate**: library complexity from HyperLogLog unique k-mer counting
-- **Quality tier**: PASS, WARN, or FAIL based on profile-specific thresholds
-- **Flags**: specific warnings (low survival, high adapter contamination, etc.)
+- **Quality tier**: PASS, WARN, or FAIL based on QC survival rate of unique reads (dedup does not cause FAIL)
+- **Flags**: contextual warnings with dominant cause identification (e.g., "Only 33% of unique reads survived QC -- largest contributor: host (22%)")
 
 The passport is designed for both human review and programmatic consumption. Downstream tools can parse it to make decisions about sample inclusion or flag batch effects.
 
@@ -294,12 +297,13 @@ Before QC runs, virome-qc scans the first 50,000 reads (R1 and R2 if paired) to 
 - **GC validation**: Checks mean GC against the profile's expected range and warns if outside bounds (e.g., ocean virome at 38% GC vs gut virome at 43%).
 - **Data-driven parameters**: Complexity threshold from sample distribution, quality window from read length, min read length from actual reads, poly-G behavior from detected chemistry, N-filter threshold from baseline N-rate.
 - **Q-score binning detection**: Automatically enables bin-aware quality trimming for NovaSeq/NextSeq.
+- **SE/PE detection**: Warns if read names contain /1 or /2 suffixes when run as single-end, suggesting the user should use paired-end mode.
 
 No user configuration needed -- the ingestion engine adjusts profile parameters based on the data.
 
 ## Validation
 
-Validated on 27 datasets across 12 real public datasets (6 sequencing platforms, 5 library preps, 5 sample types) and 15 ViroForge synthetic datasets (12 reference atlas + 3 parameter sweep benchmarks). See [VALIDATION.md](VALIDATION.md) for complete results.
+Validated on 28 datasets across 13 real public datasets (6 sequencing platforms, 5 library preps, 5 sample types) and 15 ViroForge synthetic datasets (12 reference atlas + 3 parameter sweep benchmarks). See [VALIDATION.md](VALIDATION.md) for complete results.
 
 Key findings:
 - **Zero viral false positive rate** in host depletion at 50% containment threshold (ground truth verified)

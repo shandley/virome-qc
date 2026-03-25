@@ -94,10 +94,12 @@ Scott Handley and collaborators
 1. ~~Finalize module review and ViroForge optimization~~ COMPLETE
 2. ~~Generate ViroForge reference datasets (12 sample types)~~ COMPLETE
 3. ~~Run fastp comparison on 3 datasets~~ COMPLETE
-4. Embed ViroForge reference ranges into profiles
-5. Final benchmark regeneration with latest code
-6. Write manuscript
-7. Code/data deposition (GitHub, Zenodo for filters)
+4. ~~Embed ViroForge reference ranges into profiles~~ COMPLETE
+5. ~~Final Tier 1 benchmark (13 datasets, HTCF)~~ COMPLETE
+6. ~~Separate dedup from QC survival + conservative merge~~ COMPLETE
+7. Generate publication figures
+8. Write manuscript
+9. Code/data deposition (GitHub, Zenodo for filters)
 
 ## Code and data availability
 
