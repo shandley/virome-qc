@@ -217,11 +217,21 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
     // Per-position quality profile
     let mut pos_quality = PositionQualityAccum::new(POSITION_BUCKETS);
 
+    let mut pe_hint_detected = false;
+
     for record in stream {
         let record = record?;
 
         if total_reads == 0 {
             platform = PlatformInfo::from_header(&record.id);
+
+            // Check if read names suggest paired-end data when run as SE
+            if !paired {
+                let id = &record.id;
+                if id.ends_with("/1") || id.ends_with("/2") || id.ends_with(" 1:") || id.ends_with(" 2:") {
+                    pe_hint_detected = true;
+                }
+            }
         }
 
         let seq = &record.sequence;
@@ -564,6 +574,16 @@ pub fn ingest_fastq(r1_path: &Path, r2_path: Option<&Path>) -> Result<IngestResu
                 -delta
             ));
         }
+    }
+
+    // PE data provided as SE warning
+    if pe_hint_detected {
+        warnings.push(
+            "Read names contain /1 or /2 suffixes suggesting paired-end data, \
+             but only one file was provided. Consider using -1 and -2 flags for \
+             paired-end mode (enables concordant mate flagging and read merging)."
+                .to_string(),
+        );
     }
 
     Ok(IngestResult {

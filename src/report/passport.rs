@@ -97,7 +97,7 @@ impl Passport {
     /// Create a passport from pipeline results, evaluating against profile thresholds
     pub fn from_result(result: &PipelineResult) -> Self {
         let survival_rate = result.survival_rate();
-        let thresholds = &result.thresholds;
+        let _thresholds = &result.thresholds; // Used via parameters JSON in recompute_flags()
 
         let modules: Vec<ModuleReport> = result
             .module_reports
@@ -105,74 +105,8 @@ impl Passport {
             .map(|(_, report)| report.clone())
             .collect();
 
-        let mut flags = Vec::new();
-
-        // Check survival rate against profile threshold
-        if survival_rate < thresholds.min_survival_rate * 1.5 {
-            // Identify the dominant cause of read loss
-            let dominant = modules
-                .iter()
-                .max_by_key(|m| m.reads_removed)
-                .map(|m| {
-                    let pct = m.reads_removed as f64 / result.reads_input as f64 * 100.0;
-                    format!(" -- largest contributor: {} ({:.1}%)", m.name, pct)
-                })
-                .unwrap_or_default();
-
-            let is_fail = survival_rate < thresholds.min_survival_rate;
-            flags.push(QcFlag {
-                code: "LOW_SURVIVAL".into(),
-                message: format!(
-                    "{}{:.1}% of reads survived QC (threshold: {:.1}%){}",
-                    if is_fail { "Only " } else { "" },
-                    survival_rate * 100.0,
-                    thresholds.min_survival_rate * 100.0,
-                    dominant,
-                ),
-                severity: if is_fail {
-                    QualityTier::Fail
-                } else {
-                    QualityTier::Warn
-                },
-            });
-        }
-
-        // Check per-module metrics against thresholds
-        Self::check_module_thresholds(&modules, result, thresholds, &mut flags);
-
-        // Check GC content against expected range
-        if let Some((gc_min, gc_max)) = thresholds.expected_gc_range {
-            if let Some(ref qa) = result.qa_stats {
-                let gc = &qa.distributions.gc_content;
-                if gc.total > 0 {
-                    let mut gc_sum = 0.0;
-                    let mut gc_count = 0u64;
-                    for (i, &c) in gc.counts.iter().enumerate() {
-                        if i < gc.bin_edges.len() {
-                            gc_sum += gc.bin_edges[i] * c as f64;
-                            gc_count += c;
-                        }
-                    }
-                    if gc_count > 0 {
-                        let mean_gc = gc_sum / gc_count as f64;
-                        if mean_gc < gc_min || mean_gc > gc_max {
-                            flags.push(QcFlag {
-                                code: "GC_DEVIATION".into(),
-                                message: format!(
-                                    "Mean GC {:.1}% is outside expected range ({:.0}-{:.0}%) for this profile",
-                                    mean_gc * 100.0,
-                                    gc_min * 100.0,
-                                    gc_max * 100.0
-                                ),
-                                severity: QualityTier::Warn,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // Determine overall tier from flags
+        // Placeholder — recompute_flags() will set the real flags and tier
+        let flags: Vec<QcFlag> = Vec::new();
         let quality_tier = if flags.iter().any(|f| f.severity == QualityTier::Fail) {
             QualityTier::Fail
         } else if flags.iter().any(|f| f.severity == QualityTier::Warn) {
@@ -283,7 +217,7 @@ impl Passport {
             }))
         };
 
-        Self {
+        let mut passport = Self {
             tool_version: env!("CARGO_PKG_VERSION").to_string(),
             profile: result.profile_name.clone(),
             reads_input: result.reads_input,
@@ -301,10 +235,16 @@ impl Passport {
             parameters: parameters_json,
             erv_analysis: None,
             contamination_summary,
-        }
+        };
+
+        // Single source of truth for all flags — recompute from module data
+        passport.recompute_flags();
+        passport
     }
 
-    /// Check per-module metrics against profile thresholds
+    /// Legacy: Check per-module metrics against profile thresholds
+    /// Superseded by recompute_flags() which uses passport's own embedded data.
+    #[allow(dead_code)]
     fn check_module_thresholds(
         modules: &[ModuleReport],
         result: &PipelineResult,
