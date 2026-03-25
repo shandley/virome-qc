@@ -365,7 +365,7 @@ impl Profile {
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: false,
+                    enabled: true,
                     optical_distance: 2500,
                     umi_aware: false,
                 },
@@ -441,7 +441,7 @@ impl Profile {
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: false,
+                    enabled: true,
                     optical_distance: 2500,
                     umi_aware: false,
                 },
@@ -517,7 +517,7 @@ impl Profile {
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: false,
+                    enabled: true,
                     optical_distance: 2500,
                     umi_aware: false,
                 },
@@ -593,7 +593,7 @@ impl Profile {
                     rescue: true,
                 },
                 dedup: DedupConfig {
-                    enabled: false,
+                    enabled: true,
                     optical_distance: 2500,
                     umi_aware: false,
                 },

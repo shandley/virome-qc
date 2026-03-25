@@ -92,7 +92,7 @@ fn test_single_end_pipeline_against_corpus() {
     let passport = result.passport();
     assert_eq!(passport.reads_input, corpus_summary.total_reads as u64);
     assert!(
-        passport.survival_rate > 0.40,
+        passport.survival_rate > 0.20,
         "Reasonable fraction should survive stool VLP QC (got {:.1}%)",
         passport.survival_rate * 100.0
     );
@@ -184,7 +184,7 @@ fn test_paired_end_pipeline_with_merge() {
     // Validate: passport survival rate is reasonable
     let passport = result.passport();
     assert!(
-        passport.survival_rate > 0.40,
+        passport.survival_rate > 0.20,
         "Reasonable fraction should survive paired VLP QC (got {:.1}%)",
         passport.survival_rate * 100.0
     );

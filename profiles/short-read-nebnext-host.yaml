@@ -38,7 +38,7 @@ modules:
     eve_aware: false
     rescue: false
   dedup:
-    enabled: false
+    enabled: true
     optical_distance: 2500
     umi_aware: false
   chimera:

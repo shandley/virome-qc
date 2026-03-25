@@ -77,6 +77,14 @@ Reference distributions derived from ViroForge synthetic viromes (20 collections
 - Host depletion threshold analysis
 - Module ordering justification
 
+### 6. Future directions
+
+**Clinical diagnostics mode**: The ERV endogenous/exogenous classifier is already a diagnostic-grade feature — it answers "is this retroviral signal from the patient's germline or an active infection?" A `--clinical` flag would tighten thresholds across all modules (stricter quality, mandatory dedup, conservative merging, expanded contaminant database) and add negative control comparison (`--blank`). Key additions: negative control subtraction, minimum evidence thresholds for pathogen calls, and confidence scoring for ERV classification. Note: rRNA as an extraction validation positive control is only applicable for non-sterile sites (stool, oral, respiratory) — sterile sites (blood, CSF, tissue) would not have rRNA.
+
+**Probe-capture virome support**: Probe-capture/target-enrichment data requires fundamentally different QC metrics (on-target rate, enrichment fold, coverage uniformity) that are alignment-based rather than k-mer-based. This is a separate modality requiring panel BED files and a distinct reporting framework, best addressed as a v2 expansion or companion tool.
+
+**Long-read QC**: ONT and PacBio virome data requires different adapter trimming, quality filtering, and error correction strategies.
+
 ## Authors
 
 Scott Handley and collaborators
