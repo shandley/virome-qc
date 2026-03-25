@@ -53,10 +53,17 @@ pub struct Passport {
     pub profile: String,
     /// Total input reads
     pub reads_input: u64,
-    /// Total reads passing QC
+    /// Total reads passing QC (after all modules including dedup)
     pub reads_passed: u64,
-    /// Overall survival rate
+    /// Overall survival rate (reads_passed / reads_input, includes dedup)
     pub survival_rate: f64,
+    /// Unique reads after deduplication (reads_input - dedup_removed)
+    #[serde(default)]
+    pub unique_reads: u64,
+    /// QC survival of unique reads (excludes dedup from the denominator)
+    /// This is the true quality metric: what fraction of unique molecules passed QC.
+    #[serde(default)]
+    pub qc_survival_rate: f64,
     /// Pairs where both mates passed (paired-end only)
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pairs_passed: u64,
@@ -187,12 +194,28 @@ impl Passport {
             })
         });
 
-        // Compute contamination summary before moving modules
+        // Compute contamination summary and library metrics before moving modules
+        // Dedup is a library characteristic, NOT a quality failure — separate it
+        let dedup_removed: u64 = modules
+            .iter()
+            .filter(|m| m.name == "dedup")
+            .map(|m| m.reads_removed)
+            .sum();
+        let unique_reads = result.reads_input.saturating_sub(dedup_removed);
+        let qc_fail_non_dedup: u64 = modules
+            .iter()
+            .filter(|m| m.name != "dedup" && m.name != "erv" && m.name != "length_filter")
+            .map(|m| m.reads_removed)
+            .sum();
+        let qc_survival_rate = if unique_reads > 0 {
+            (unique_reads.saturating_sub(qc_fail_non_dedup)) as f64 / unique_reads as f64
+        } else {
+            0.0
+        };
+
         let contamination_summary = {
             let biological_modules = ["contaminant", "rrna", "host"];
-            let technical_modules = [
-                "adapter", "polyx", "n_filter", "quality", "complexity", "dedup",
-            ];
+            let technical_modules = ["adapter", "polyx", "n_filter", "quality", "complexity"];
 
             let bio_removed: u64 = modules
                 .iter()
@@ -214,6 +237,10 @@ impl Passport {
                 "technical_artifacts_fraction": if ri > 0.0 { tech_removed as f64 / ri } else { 0.0 },
                 "total_removed": bio_removed + tech_removed,
                 "total_removed_fraction": if ri > 0.0 { (bio_removed + tech_removed) as f64 / ri } else { 0.0 },
+                "dedup_removed": dedup_removed,
+                "dedup_fraction": if ri > 0.0 { dedup_removed as f64 / ri } else { 0.0 },
+                "unique_reads": unique_reads,
+                "qc_survival_rate": qc_survival_rate,
             }))
         };
 
@@ -223,6 +250,8 @@ impl Passport {
             reads_input: result.reads_input,
             reads_passed: result.reads_passed,
             survival_rate,
+            unique_reads,
+            qc_survival_rate,
             pairs_passed: result.pairs_passed,
             singletons: result.singletons,
             pairs_merged: result.pairs_merged,
@@ -464,7 +493,7 @@ impl Passport {
             .and_then(|q| q.get("max_host_fraction"))
             .and_then(|v| v.as_f64())
             .unwrap_or(0.20);
-        let max_dup = qa
+        let _max_dup = qa
             .and_then(|q| q.get("max_duplicate_rate"))
             .and_then(|v| v.as_f64())
             .unwrap_or(0.50);
@@ -475,11 +504,32 @@ impl Passport {
 
         let mut flags = Vec::new();
 
-        // Survival
-        if self.survival_rate < min_survival * 1.5 {
+        // Recompute unique_reads and qc_survival_rate from module data
+        let dedup_removed: u64 = self
+            .modules
+            .iter()
+            .filter(|m| m.name == "dedup")
+            .map(|m| m.reads_removed)
+            .sum();
+        self.unique_reads = self.reads_input.saturating_sub(dedup_removed);
+        let qc_fail_non_dedup: u64 = self
+            .modules
+            .iter()
+            .filter(|m| m.name != "dedup" && m.name != "erv" && m.name != "length_filter")
+            .map(|m| m.reads_removed)
+            .sum();
+        self.qc_survival_rate = if self.unique_reads > 0 {
+            self.unique_reads.saturating_sub(qc_fail_non_dedup) as f64 / self.unique_reads as f64
+        } else {
+            0.0
+        };
+
+        // QC survival (excludes dedup — dedup is a library characteristic, not quality failure)
+        if self.qc_survival_rate < min_survival * 1.5 {
             let dominant = self
                 .modules
                 .iter()
+                .filter(|m| m.name != "dedup")
                 .max_by_key(|m| m.reads_removed)
                 .map(|m| {
                     let pct = m.reads_removed as f64 / ri * 100.0;
@@ -487,13 +537,13 @@ impl Passport {
                 })
                 .unwrap_or_default();
 
-            let is_fail = self.survival_rate < min_survival;
+            let is_fail = self.qc_survival_rate < min_survival;
             flags.push(QcFlag {
-                code: "LOW_SURVIVAL".into(),
+                code: "LOW_QC_SURVIVAL".into(),
                 message: format!(
-                    "{}{:.1}% of reads survived QC (threshold: {:.1}%){}",
+                    "{}{:.1}% of unique reads survived QC (threshold: {:.1}%){}",
                     if is_fail { "Only " } else { "" },
-                    self.survival_rate * 100.0,
+                    self.qc_survival_rate * 100.0,
                     min_survival * 100.0,
                     dominant,
                 ),
@@ -523,6 +573,32 @@ impl Passport {
                     }
                 }
             }
+        }
+
+        // Library complexity (dedup) — informational, separate from QC tier
+        let dedup_frac = dedup_removed as f64 / ri;
+        if dedup_frac > 0.50 {
+            flags.push(QcFlag {
+                code: "HIGH_DUPLICATION".into(),
+                message: format!(
+                    "{:.1}% of reads are duplicates ({} unique of {} total) -- MDA amplification or low-input library",
+                    dedup_frac * 100.0,
+                    self.unique_reads,
+                    self.reads_input,
+                ),
+                severity: QualityTier::Warn,
+            });
+        } else if dedup_frac > 0.20 {
+            flags.push(QcFlag {
+                code: "MODERATE_DUPLICATION".into(),
+                message: format!(
+                    "{:.1}% of reads are duplicates ({} unique of {} total)",
+                    dedup_frac * 100.0,
+                    self.unique_reads,
+                    self.reads_input,
+                ),
+                severity: QualityTier::Warn,
+            });
         }
 
         // Per-module flags
@@ -635,17 +711,7 @@ impl Passport {
                     }
                 }
                 "dedup" => {
-                    if removal_rate > max_dup {
-                        flags.push(QcFlag {
-                            code: "HIGH_DUPLICATION".into(),
-                            message: format!(
-                                "{:.1}% of reads removed as duplicates (threshold: {:.0}%)",
-                                removal_rate * 100.0,
-                                max_dup * 100.0
-                            ),
-                            severity: QualityTier::Warn,
-                        });
-                    }
+                    // Handled above with separate dedup logic (not a QC failure)
                 }
                 "complexity" => {
                     if removal_rate > 0.10 {
