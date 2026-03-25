@@ -47,7 +47,6 @@ Updated 2026-03-24. Organized into tiers for paper, extended validation, and HPC
 | # | Dataset | Accession | Platform | Reads | What it tests |
 |---|---------|-----------|----------|-------|--------------|
 | 10 | TARA ocean | ERR599370 | Illumina 2x101 | 19.5M PE | Giant virus FPs, environmental baseline |
-| 11 | Tisza wastewater | PRJNA966185 (1 sample) | NovaSeq 2x150 | TBD | Best-characterized wastewater virome |
 
 ### Non-Illumina platforms
 
@@ -101,6 +100,12 @@ This becomes the virome-qc-atlas: empirical expected ranges from thousands of re
 - Output: ~5,000 passports at ~100 KB each = ~500 MB
 - Estimated wall time: ~4 days at 8 parallel processes
 - Bottleneck is SRA download bandwidth, not processing
+
+## Excluded: Probe-Capture Viromes
+
+Probe-capture/target-enrichment virome data (e.g., TWIST Comprehensive Viral Panel, VirCapSeq-VERT) is **not supported** by virome-qc v1. Probe-capture is a fundamentally different modality requiring panel-aware, alignment-based QC metrics (on-target rate, enrichment fold, coverage uniformity, cross-reactivity detection) that are architecturally distinct from virome-qc's alignment-free k-mer approach.
+
+The Tisza wastewater dataset (PRJNA966185, TWIST panel) was evaluated during benchmarking and showed 83% rRNA — consistent with off-target capture from high-bacterial-load samples. While virome-qc's adapter, quality, rRNA, and host modules work correctly on probe-capture data, the tool does not provide the capture-specific metrics users need. Probe-capture virome QC is a recognized gap in the field (no standard pipeline exists as of 2026) and may be addressed in a future version.
 
 ## Changes from Previous Set
 

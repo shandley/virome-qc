@@ -45,7 +45,7 @@ DATASETS=(
     "8|zhang_depleted|SRR33419066|PE|profiles/short-read-nebnext.yaml|"
     "9|tara_ocean|ERR599370|PE|profiles/short-read-nebnext.yaml|"
     "10|chrisman_dnbseq|ERR9765742|SE|profiles/short-read-nebnext.yaml|"
-    "11|tisza_wastewater|SRR24403399|PE|profiles/short-read-nebnext.yaml|"
+    "11|REMOVED_probe_capture|SKIP|PE|profiles/short-read-nebnext.yaml|"
     "12|cook_ont|ERR10359840|SE|profiles/short-read-nebnext.yaml|"
     "13|negativeome_blank|ERR3487542|PE|stool-vlp-tagmentation|"
     "14|hiv_gut_virome|SRR27430060|PE|profiles/short-read-nebnext.yaml|"
