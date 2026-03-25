@@ -36,16 +36,16 @@ virome-qc addresses all of these with a single, opinionated pipeline that produc
 - **Validated on 27 datasets** (12 real public + 12 ViroForge reference + 3 ViroForge benchmarks) across 6 sequencing platforms, 5 library preps, and 5 sample types
 - **Head-to-head with fastp**: virome-qc keeps more viral reads on clean data (+4.3%) and removes more contaminants on dirty data (-6.8%)
 
-Built on [biometal](https://github.com/shandley/biometal) for NEON-optimized sequence operations.
+Built on [biometal](https://github.com/shandley/biometal) for SIMD-optimized sequence operations and [SuperBloom](https://github.com/EtienneC-K/SuperBloom) for the host depletion filter.
 
 ## Installation
 
-Requires Rust 1.75+ and local copies of [biometal](https://github.com/shandley/biometal) and [SuperBloom](https://github.com/shandley/SuperBloom).
+Requires Rust 1.75+ and local copies of [biometal](https://github.com/shandley/biometal) and [SuperBloom](https://github.com/EtienneC-K/SuperBloom).
 
 ```bash
 # Clone all three repositories
 git clone https://github.com/shandley/biometal.git
-git clone https://github.com/shandley/SuperBloom.git
+git clone https://github.com/EtienneC-K/SuperBloom.git
 git clone https://github.com/shandley/virome-qc.git
 
 # Update Cargo.toml paths to point to your local copies

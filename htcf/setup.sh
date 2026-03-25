@@ -29,7 +29,7 @@ if [ ! -d "biometal" ]; then
 fi
 
 if [ ! -d "SuperBloom" ]; then
-    git clone https://github.com/shandley/SuperBloom.git
+    git clone https://github.com/EtienneC-K/SuperBloom.git
 fi
 
 if [ ! -d "virome-qc" ]; then
