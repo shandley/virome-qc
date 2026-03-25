@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub enum MergeResult {
     /// Reads were merged into a single record
     Merged(FastqRecord),
-    /// Reads do not overlap sufficiently — return original pair
+    /// Reads do not overlap sufficiently or overlap is ambiguous — return original pair
     Unmerged(FastqRecord, FastqRecord),
 }
 
@@ -154,10 +154,11 @@ fn consensus_base(base1: u8, qual1: u8, base2: u8, qual2: u8) -> (u8, u8) {
 /// Find the best suffix-prefix overlap between R1 and R2_RC
 ///
 /// Uses biometal's `hamming_distance` for efficient mismatch counting
-/// at each candidate overlap position. Iterates from longest to shortest
-/// overlap and returns the first (longest) valid overlap found.
+/// at each candidate overlap position. Finds the best (lowest mismatch rate)
+/// overlap and checks for ambiguity — if a second valid overlap exists with
+/// a similar score, the merge is considered ambiguous and rejected.
 ///
-/// Returns (overlap_start_in_r1, overlap_length) if found.
+/// Returns (overlap_start_in_r1, overlap_length) if an unambiguous overlap is found.
 fn find_best_overlap(
     r1: &[u8],
     r2_rc: &[u8],
@@ -168,25 +169,64 @@ fn find_best_overlap(
     let r2_len = r2_rc.len();
     let max_overlap = r1_len.min(r2_len);
 
-    // Scan from longest overlap to shortest — return first valid match
+    // Collect all valid overlaps with their mismatch rates
+    let mut best: Option<(usize, usize, f64)> = None; // (start, len, mismatch_rate)
+    let mut second_best: Option<(usize, usize, f64)> = None;
+
     for overlap in (min_overlap..=max_overlap).rev() {
         let r1_start = r1_len - overlap;
         let r1_region = &r1[r1_start..];
         let r2_region = &r2_rc[..overlap];
 
-        // Use biometal's hamming_distance for mismatch counting
         let mismatches = match hamming_distance(r1_region, r2_region) {
             Ok(d) => d,
-            Err(_) => continue, // length mismatch, skip
+            Err(_) => continue,
         };
         let max_allowed = (overlap as f64 * max_mismatch_rate).ceil() as usize;
 
         if mismatches <= max_allowed {
-            return Some((r1_start, overlap));
+            let rate = mismatches as f64 / overlap as f64;
+
+            match best {
+                None => {
+                    best = Some((r1_start, overlap, rate));
+                }
+                Some((_, _, best_rate)) => {
+                    if rate < best_rate {
+                        second_best = best;
+                        best = Some((r1_start, overlap, rate));
+                    } else if second_best.is_none() {
+                        second_best = Some((r1_start, overlap, rate));
+                    }
+                }
+            }
         }
     }
 
-    None
+    // Check for ambiguity: if second-best overlap has a similar mismatch rate,
+    // the merge is ambiguous and we shouldn't merge.
+    // "Similar" = within 2x the best mismatch rate, or both below 2%
+    if let (Some((start, len, best_rate)), Some((_, _, second_rate))) = (best, second_best) {
+        let ambiguous = if best_rate < 0.02 && second_rate < 0.02 {
+            // Both nearly perfect — ambiguous (repetitive overlap region)
+            true
+        } else if best_rate < 0.001 {
+            // Best is essentially perfect, second is not — unambiguous
+            false
+        } else {
+            // Second is within 2x of best — ambiguous
+            second_rate <= best_rate * 2.0
+        };
+
+        if ambiguous {
+            return None;
+        }
+
+        return Some((start, len));
+    }
+
+    // Only one valid overlap — unambiguous
+    best.map(|(start, len, _)| (start, len))
 }
 
 #[cfg(test)]
