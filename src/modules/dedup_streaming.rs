@@ -3,10 +3,9 @@
 //! Uses a FxHashSet of read hashes to track seen sequences. First occurrence
 //! passes, subsequent occurrences are failed as PCR duplicates.
 //!
-//! For paired-end: both mates are hashed together (R1 prefix + R2 prefix)
-//! via the executor's paired processing. Each mate independently hashes
-//! against the shared set, so this module works for single-end in the
-//! streaming pipeline. Paired-end concordance is handled by the executor.
+//! For paired-end, `process_pair` keys on both mates' prefixes combined, so two
+//! distinct fragments that share one mate's start are not collapsed; a duplicate
+//! pair fails both mates. Single-end uses `process` on each read's own prefix.
 //!
 //! Virome-aware: uses prefix-only hashing (skips first 5bp for trim tolerance)
 //! so contained reads from differential trimming are correctly identified.
@@ -68,6 +67,37 @@ impl QcModule for StreamingDedup {
         }
     }
 
+    /// Paired dedup: key on both mates' prefixes combined, so two distinct
+    /// fragments that share one mate's start are not collapsed. A duplicate pair
+    /// fails both mates. If either mate already failed an upstream module, the pair
+    /// is skipped (it will be dropped by concordant-mate handling anyway).
+    fn process_pair(&self, r1: &mut AnnotatedRecord, r2: &mut AnnotatedRecord) {
+        if r1.is_failed() || r2.is_failed() {
+            return;
+        }
+        self.stats.record_processed();
+        self.stats.record_processed();
+
+        let s1 = &r1.record.sequence;
+        let s2 = &r2.record.sequence;
+        if s1.len() < SKIP_BASES + 10 || s2.len() < SKIP_BASES + 10 {
+            return; // too short to hash meaningfully
+        }
+
+        let combined = combine_hashes(hash_prefix(s1), hash_prefix(s2));
+        let is_new = {
+            let mut set = self.seen.lock().unwrap();
+            set.insert(combined)
+        };
+        if !is_new {
+            r1.fail("pcr_duplicate");
+            r2.fail("pcr_duplicate");
+            self.duplicates_removed.fetch_add(2, Ordering::Relaxed);
+            self.stats.record_removed();
+            self.stats.record_removed();
+        }
+    }
+
     fn report(&self) -> ModuleReport {
         let seen_count = self.seen.lock().unwrap().len() as u64;
         self.stats.to_report(
@@ -83,6 +113,16 @@ impl QcModule for StreamingDedup {
     fn name(&self) -> &str {
         "dedup"
     }
+}
+
+/// Order-dependent combine of two mate prefix hashes (R1 then R2), so a pair
+/// (R1, R2) is distinct from (R2, R1). boost::hash_combine style mix.
+#[inline]
+fn combine_hashes(h1: u64, h2: u64) -> u64 {
+    h1 ^ h2
+        .wrapping_add(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(h1 << 6)
+        .wrapping_add(h1 >> 2)
 }
 
 /// Hash read prefix (skip first 5 bases for trim tolerance)
@@ -186,5 +226,44 @@ mod tests {
         let report = dedup.report();
         assert_eq!(report.reads_processed, 5);
         assert_eq!(report.reads_removed, 4); // 1 unique + 4 duplicates
+    }
+
+    #[test]
+    fn test_pair_shared_r1_prefix_not_collapsed() {
+        // Regression: two distinct fragments from an abundant virus can share the
+        // same R1 start. Keying on R1 alone wrongly collapsed the second fragment.
+        let dedup = make_dedup();
+        let r1: Vec<u8> = (0..100).map(|i| [b'A', b'T', b'G', b'C'][i % 4]).collect();
+        let r2a: Vec<u8> = (0..100).map(|i| [b'A', b'C', b'G', b'T'][i % 4]).collect();
+        let r2b: Vec<u8> = (0..100).map(|i| [b'G', b'G', b'C', b'C'][i % 4]).collect();
+
+        let (mut a1, mut a2) = (make_record(&r1), make_record(&r2a));
+        dedup.process_pair(&mut a1, &mut a2);
+        assert!(!a1.is_failed() && !a2.is_failed(), "first pair should pass");
+
+        let (mut b1, mut b2) = (make_record(&r1), make_record(&r2b));
+        dedup.process_pair(&mut b1, &mut b2);
+        assert!(
+            !b1.is_failed() && !b2.is_failed(),
+            "distinct fragment sharing only the R1 start must NOT be deduplicated"
+        );
+    }
+
+    #[test]
+    fn test_true_duplicate_pair_both_fail() {
+        let dedup = make_dedup();
+        let r1: Vec<u8> = (0..100).map(|i| [b'A', b'T', b'G', b'C'][i % 4]).collect();
+        let r2: Vec<u8> = (0..100).map(|i| [b'A', b'C', b'G', b'T'][i % 4]).collect();
+
+        let (mut a1, mut a2) = (make_record(&r1), make_record(&r2));
+        dedup.process_pair(&mut a1, &mut a2);
+        assert!(!a1.is_failed() && !a2.is_failed());
+
+        let (mut b1, mut b2) = (make_record(&r1), make_record(&r2));
+        dedup.process_pair(&mut b1, &mut b2);
+        assert!(
+            b1.is_failed() && b2.is_failed(),
+            "an identical pair should fail both mates as duplicates"
+        );
     }
 }

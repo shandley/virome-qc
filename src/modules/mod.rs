@@ -6,6 +6,7 @@ mod contaminant;
 mod contaminant_refs;
 pub mod dedup;
 mod dedup_streaming;
+pub mod eve_exclusion;
 pub mod host;
 mod length;
 pub mod merge;
@@ -14,8 +15,6 @@ mod polyx;
 pub mod qa_stats;
 mod quality;
 pub mod erv;
-pub mod erv_classifier;
-pub mod erv_pipeline;
 pub mod rrna;
 
 pub use adapter::AdapterTrimmer;
@@ -60,6 +59,20 @@ pub struct ModuleReport {
 pub trait QcModule: Send + Sync {
     /// Process a single annotated read
     fn process(&self, record: &mut AnnotatedRecord);
+
+    /// Process a paired R1/R2 together. The default processes each mate
+    /// independently (respecting a prior failure), which is correct for every
+    /// per-read module. Modules that must treat the pair as a unit (deduplication,
+    /// which keys on both mates so distinct fragments sharing one mate's start are
+    /// not collapsed) override this.
+    fn process_pair(&self, r1: &mut AnnotatedRecord, r2: &mut AnnotatedRecord) {
+        if !r1.is_failed() {
+            self.process(r1);
+        }
+        if !r2.is_failed() {
+            self.process(r2);
+        }
+    }
 
     /// Generate aggregate report for this module
     fn report(&self) -> ModuleReport;

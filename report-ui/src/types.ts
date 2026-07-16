@@ -6,6 +6,8 @@ export interface Passport {
   reads_input: number;
   reads_passed: number;
   survival_rate: number;
+  unique_reads?: number;
+  qc_survival_rate?: number;
   pairs_passed?: number;
   singletons?: number;
   pairs_merged?: number;
@@ -16,7 +18,6 @@ export interface Passport {
   provenance?: Provenance;
   ingestion?: Record<string, unknown>;
   parameters?: Record<string, unknown>;
-  erv_analysis?: ErvAnalysis;
   contamination_summary?: {
     biological_contamination_removed: number;
     biological_contamination_fraction: number;
@@ -27,34 +28,30 @@ export interface Passport {
   };
 }
 
-export interface ErvAnalysis {
-  retroviral_reads_flagged: number;
-  retroviral_reads_collected: number;
-  clusters_total: number;
-  classifications: {
-    endogenous: number;
-    ambiguous: number;
-    exogenous: number;
-  };
-  loci: ErvLocus[];
+/** Expected QC metric ranges from ViroForge calibration. */
+export interface ExpectedRanges {
+  survival?: [number, number];
+  host_fraction?: [number, number];
+  rrna_fraction?: [number, number];
+  adapter_rate?: [number, number];
+  duplication_rate?: [number, number];
+  gc_content?: [number, number];
 }
 
-export interface ErvLocus {
-  cluster_id: number;
-  reads: number;
-  best_match: string;
-  classification: "Endogenous" | "Ambiguous" | "Exogenous";
-  combined_score: number;
-  cpg_ratio: number;
-  cpg_score: number;
-  orf_intact: number;
-  orf_score: number;
-  minhash_score: number;
-  dist_erv: number;
-  dist_exo: number;
-  nearest_erv: string;
-  nearest_exo: string;
-  depth_ratio: number;
+/** Extract expected ranges from passport parameters. */
+export function getExpectedRanges(p: Passport): ExpectedRanges | null {
+  const er = (p.parameters as Record<string, unknown> | undefined)
+    ?.quality_assessment as Record<string, unknown> | undefined;
+  const ranges = er?.expected_ranges as ExpectedRanges | undefined;
+  if (!ranges) return null;
+  // Fallback: if gc_content not in expected_ranges, try expected_gc_range
+  if (!ranges.gc_content && er?.expected_gc_range) {
+    const gc = er.expected_gc_range as [number, number];
+    if (Array.isArray(gc) && gc.length === 2) {
+      ranges.gc_content = gc;
+    }
+  }
+  return ranges;
 }
 
 export interface ModuleReport {

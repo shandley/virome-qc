@@ -327,12 +327,7 @@ impl Pipeline {
                 let mut ann_r2 = AnnotatedRecord::new(r2.clone());
 
                 for module in modules {
-                    if !ann_r1.is_failed() {
-                        module.process(&mut ann_r1);
-                    }
-                    if !ann_r2.is_failed() {
-                        module.process(&mut ann_r2);
-                    }
+                    module.process_pair(&mut ann_r1, &mut ann_r2);
                 }
 
                 // Paired-end concordant flagging:

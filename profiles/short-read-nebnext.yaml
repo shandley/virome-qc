@@ -52,8 +52,12 @@ thresholds:
   max_rrna_fraction: 0.15
   max_duplicate_rate: 0.50
   expected_gc_range: [0.35, 0.65]
+  # ViroForge calibration: metagenomics-nextera profile, 5 datasets, 2026-03-27.
+  # Survival is QCSurv (dedup-excluded).
   expected_ranges:
-    survival: [0.80, 0.999]
-    host_fraction: [0.0, 0.06]
-    rrna_fraction: [0.001, 0.10]
-    adapter_rate: [0.001, 0.06]
+    survival: [0.87, 0.99]
+    host_fraction: [0.001, 0.03]
+    rrna_fraction: [0.005, 0.035]
+    adapter_rate: [0.0, 0.02]
+    duplication_rate: [0.08, 0.55]
+    gc_content: [0.35, 0.65]

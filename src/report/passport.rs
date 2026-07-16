@@ -92,9 +92,6 @@ pub struct Passport {
     /// Applied module parameters (after all overrides, with source annotations)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
-    /// ERV analysis results (post-pipeline retroviral classification)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub erv_analysis: Option<serde_json::Value>,
     /// Contamination summary: aggregates biological removal modules
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contamination_summary: Option<serde_json::Value>,
@@ -202,13 +199,20 @@ impl Passport {
             .map(|m| m.reads_removed)
             .sum();
         let unique_reads = result.reads_input.saturating_sub(dedup_removed);
-        let qc_fail_non_dedup: u64 = modules
+        // Quality survival among post-dedup (unique) reads. Count reads that passed the
+        // whole pipeline, plus those removed only by the length-filter safety net (not a
+        // quality failure). The ERV screen is informational and removes nothing. Reads
+        // removed as a concordant mate are applied in the executor, not by a module, and
+        // ARE quality failures; they are correctly excluded here via reads_passed (whereas
+        // re-summing module reads_removed would silently miss them and inflate survival).
+        let length_removed: u64 = modules
             .iter()
-            .filter(|m| m.name != "dedup" && m.name != "erv" && m.name != "length_filter")
+            .filter(|m| m.name == "length_filter")
             .map(|m| m.reads_removed)
             .sum();
+        let qc_survivors = (result.reads_passed + length_removed).min(unique_reads);
         let qc_survival_rate = if unique_reads > 0 {
-            (unique_reads.saturating_sub(qc_fail_non_dedup)) as f64 / unique_reads as f64
+            qc_survivors as f64 / unique_reads as f64
         } else {
             0.0
         };
@@ -262,7 +266,6 @@ impl Passport {
             provenance: result.provenance.clone(),
             ingestion: ingestion_json,
             parameters: parameters_json,
-            erv_analysis: None,
             contamination_summary,
         };
 
@@ -512,14 +515,18 @@ impl Passport {
             .map(|m| m.reads_removed)
             .sum();
         self.unique_reads = self.reads_input.saturating_sub(dedup_removed);
-        let qc_fail_non_dedup: u64 = self
+        // See the passport builder: quality survivors = reads that passed the pipeline plus
+        // length-filter-only removals; concordant-mate removals are quality failures and are
+        // excluded via reads_passed rather than being silently dropped from a module sum.
+        let length_removed: u64 = self
             .modules
             .iter()
-            .filter(|m| m.name != "dedup" && m.name != "erv" && m.name != "length_filter")
+            .filter(|m| m.name == "length_filter")
             .map(|m| m.reads_removed)
             .sum();
+        let qc_survivors = (self.reads_passed + length_removed).min(self.unique_reads);
         self.qc_survival_rate = if self.unique_reads > 0 {
-            self.unique_reads.saturating_sub(qc_fail_non_dedup) as f64 / self.unique_reads as f64
+            qc_survivors as f64 / self.unique_reads as f64
         } else {
             0.0
         };
@@ -754,5 +761,99 @@ impl Passport {
         let yaml = serde_yaml::to_string(self)?;
         std::fs::write(path, yaml)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod survival_tests {
+    use super::*;
+
+    fn module(name: &str, reads_removed: u64) -> ModuleReport {
+        ModuleReport {
+            name: name.to_string(),
+            reads_processed: 0,
+            reads_removed,
+            reads_modified: 0,
+            bases_removed: 0,
+            extra: serde_json::Value::Null,
+        }
+    }
+
+    fn passport_with(reads_input: u64, reads_passed: u64, modules: Vec<ModuleReport>) -> Passport {
+        Passport {
+            tool_version: "test".into(),
+            profile: "test".into(),
+            reads_input,
+            reads_passed,
+            survival_rate: 0.0,
+            unique_reads: 0,
+            qc_survival_rate: 0.0,
+            pairs_passed: 0,
+            singletons: 0,
+            pairs_merged: 0,
+            modules,
+            flags: Vec::new(),
+            quality_tier: QualityTier::Pass,
+            qa_stats: None,
+            provenance: None,
+            ingestion: None,
+            parameters: None,
+            contamination_summary: None,
+        }
+    }
+
+    // Regression: 100% host-contaminated paired data. Host fails N reads (a module),
+    // and the executor fails the other N as concordant_mate (NOT a module). The old
+    // formula re-summed module removals, missed the concordant_mate N, and reported
+    // 50% survival for a sample where 0% survived.
+    #[test]
+    fn qc_survival_counts_concordant_mate_as_failure() {
+        let n = 100u64;
+        let mut p = passport_with(2 * n, 0, vec![module("host", n), module("length_filter", 0)]);
+        p.recompute_flags();
+        assert_eq!(p.unique_reads, 2 * n);
+        assert!(
+            p.qc_survival_rate.abs() < 1e-9,
+            "expected 0% survival, got {}",
+            p.qc_survival_rate
+        );
+    }
+
+    #[test]
+    fn qc_survival_clean_library_is_full() {
+        let mut p = passport_with(100, 100, vec![]);
+        p.recompute_flags();
+        assert!(
+            (p.qc_survival_rate - 1.0).abs() < 1e-9,
+            "expected 100% survival, got {}",
+            p.qc_survival_rate
+        );
+    }
+
+    // Length-filter removals are a safety net, not a quality failure: reads removed
+    // only by length_filter still count as quality survivors.
+    #[test]
+    fn qc_survival_length_filter_removals_are_survivors() {
+        let mut p = passport_with(100, 90, vec![module("length_filter", 10)]);
+        p.recompute_flags();
+        assert!(
+            (p.qc_survival_rate - 1.0).abs() < 1e-9,
+            "length-only removals should count as survivors, got {}",
+            p.qc_survival_rate
+        );
+    }
+
+    // Dedup is excluded from the denominator (a library characteristic, not a QC failure).
+    #[test]
+    fn qc_survival_excludes_dedup_from_denominator() {
+        // 100 input, 20 dedup duplicates -> 80 unique; all 80 pass QC.
+        let mut p = passport_with(100, 80, vec![module("dedup", 20)]);
+        p.recompute_flags();
+        assert_eq!(p.unique_reads, 80);
+        assert!(
+            (p.qc_survival_rate - 1.0).abs() < 1e-9,
+            "expected 100% qc survival of unique reads, got {}",
+            p.qc_survival_rate
+        );
     }
 }

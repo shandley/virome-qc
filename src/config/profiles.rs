@@ -179,8 +179,9 @@ pub struct Thresholds {
     pub max_rrna_fraction: f64,
     /// Maximum duplicate rate (above = WARN)
     pub max_duplicate_rate: f64,
-    /// Expected GC content range [min, max] for this sample type (0.0-1.0)
-    /// Deviation beyond this range triggers a WARN flag
+    /// Expected GC content range [min, max] for this sample type (0.0-1.0).
+    /// Deviation beyond this range triggers a WARN flag.
+    /// Deprecated: prefer expected_ranges.gc_content. Kept for backward compatibility.
     #[serde(default)]
     pub expected_gc_range: Option<(f64, f64)>,
     /// Expected QC metric ranges derived from ViroForge reference datasets.
@@ -190,10 +191,16 @@ pub struct Thresholds {
 }
 
 /// Expected QC metric ranges for a sample type, derived from ViroForge reference data.
+///
+/// Survival is QCSurv (dedup-excluded): fraction of unique reads passing QC modules.
+/// This separates library quality (duplication) from data quality (contamination, artifacts).
 /// All values are fractions (0.0-1.0).
+///
+/// Calibrated from 20 ViroForge synthetic datasets (5 per profile, 10x coverage)
+/// processed through virome-qc with SILVA + T2T filters. See VALIDATION.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpectedRanges {
-    /// Expected survival rate range [min, max]
+    /// Expected QC survival rate range [min, max] (dedup-excluded)
     pub survival: (f64, f64),
     /// Expected host fraction range [min, max]
     pub host_fraction: (f64, f64),
@@ -202,6 +209,12 @@ pub struct ExpectedRanges {
     /// Expected adapter rate range [min, max]
     #[serde(default)]
     pub adapter_rate: Option<(f64, f64)>,
+    /// Expected duplication rate range [min, max]
+    #[serde(default)]
+    pub duplication_rate: Option<(f64, f64)>,
+    /// Expected GC content range [min, max]
+    #[serde(default)]
+    pub gc_content: Option<(f64, f64)>,
 }
 
 // Default value functions for serde
@@ -275,9 +288,19 @@ impl Profile {
 
     /// List all available profile names
     pub fn list_available() -> Vec<String> {
-        let mut profiles: Vec<String> = Self::builtin_names()
+        Self::list_with_descriptions()
             .into_iter()
-            .map(String::from)
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    /// List all available profiles with their descriptions
+    pub fn list_with_descriptions() -> Vec<(String, String)> {
+        let mut profiles: Vec<(String, String)> = Self::builtin_names()
+            .into_iter()
+            .filter_map(|name| {
+                Self::builtin(name).map(|cfg| (name.to_string(), cfg.description))
+            })
             .collect();
 
         // Also scan profiles directory
@@ -285,14 +308,17 @@ impl Profile {
             for entry in entries.flatten() {
                 if let Some(name) = entry.path().file_stem() {
                     let name = name.to_string_lossy().to_string();
-                    if !profiles.contains(&name) {
-                        profiles.push(name);
+                    if !profiles.iter().any(|(n, _)| n == &name) {
+                        let desc = Self::load_from_file(&entry.path())
+                            .map(|c| c.description)
+                            .unwrap_or_default();
+                        profiles.push((name, desc));
                     }
                 }
             }
         }
 
-        profiles.sort();
+        profiles.sort_by(|a, b| a.0.cmp(&b.0));
         profiles
     }
 
@@ -382,11 +408,14 @@ impl Profile {
                 max_rrna_fraction: 0.05,
                 max_duplicate_rate: 0.50,
                 expected_gc_range: Some((0.35, 0.55)),
+                // ViroForge calibration: 5 datasets (clean→high_adapter), 2026-03-27
                 expected_ranges: Some(ExpectedRanges {
-                    survival: (0.95, 0.999),
-                    host_fraction: (0.0, 0.005),
-                    rrna_fraction: (0.001, 0.02),
-                    adapter_rate: Some((0.001, 0.06)),
+                    survival: (0.98, 0.997),
+                    host_fraction: (0.0, 0.001),
+                    rrna_fraction: (0.002, 0.006),
+                    adapter_rate: Some((0.0, 0.05)),
+                    duplication_rate: Some((0.05, 0.55)),
+                    gc_content: Some((0.35, 0.55)),
                 }),
             },
         }
@@ -458,11 +487,14 @@ impl Profile {
                 max_rrna_fraction: 0.10,
                 max_duplicate_rate: 0.50,
                 expected_gc_range: Some((0.35, 0.55)),
+                // ViroForge calibration: 5 datasets (clean_tissue→ffpe_like), 2026-03-27
                 expected_ranges: Some(ExpectedRanges {
-                    survival: (0.10, 0.50),
-                    host_fraction: (0.20, 0.80),
-                    rrna_fraction: (0.001, 0.10),
-                    adapter_rate: Some((0.01, 0.30)),
+                    survival: (0.83, 0.94),
+                    host_fraction: (0.01, 0.04),
+                    rrna_fraction: (0.02, 0.05),
+                    adapter_rate: Some((0.0, 0.07)),
+                    duplication_rate: Some((0.10, 0.65)),
+                    gc_content: Some((0.35, 0.55)),
                 }),
             },
         }
@@ -534,11 +566,14 @@ impl Profile {
                 max_rrna_fraction: 0.15,
                 max_duplicate_rate: 0.50,
                 expected_gc_range: Some((0.40, 0.65)),
+                // ViroForge calibration: 5 datasets (clean_metag→dirty_metag), 2026-03-27
                 expected_ranges: Some(ExpectedRanges {
-                    survival: (0.80, 0.999),
-                    host_fraction: (0.0, 0.06),
-                    rrna_fraction: (0.001, 0.10),
-                    adapter_rate: Some((0.001, 0.06)),
+                    survival: (0.87, 0.99),
+                    host_fraction: (0.001, 0.03),
+                    rrna_fraction: (0.005, 0.035),
+                    adapter_rate: Some((0.0, 0.02)),
+                    duplication_rate: Some((0.08, 0.55)),
+                    gc_content: Some((0.40, 0.65)),
                 }),
             },
         }
@@ -612,11 +647,14 @@ impl Profile {
                 max_rrna_fraction: 0.10,
                 max_duplicate_rate: 0.70, // high duplication expected with WGA
                 expected_gc_range: Some((0.35, 0.55)),
+                // ViroForge calibration: 5 datasets (good_wga→failed_wga), 2026-03-27
                 expected_ranges: Some(ExpectedRanges {
-                    survival: (0.50, 0.95),
-                    host_fraction: (0.001, 0.10),
-                    rrna_fraction: (0.001, 0.05),
-                    adapter_rate: Some((0.01, 0.10)),
+                    survival: (0.77, 0.98),
+                    host_fraction: (0.0, 0.025),
+                    rrna_fraction: (0.003, 0.04),
+                    adapter_rate: Some((0.0, 0.05)),
+                    duplication_rate: Some((0.30, 0.70)),
+                    gc_content: Some((0.35, 0.55)),
                 }),
             },
         }

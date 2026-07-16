@@ -1,11 +1,10 @@
-//! ERV (Endogenous Retrovirus) analysis module
+//! Retroviral read detection module
 //!
-//! Post-pipeline analysis that screens clean reads for retroviral content
-//! and classifies clusters as endogenous (polymorphic ERV) or exogenous
-//! (potential active infection).
-//!
-//! Phase 1: Retroviral read extraction via k-mer containment
-//! Phase 2 (future): Three-signal classification (ORF + CpG + MinHash)
+//! Screens reads for retroviral / EVE k-mer content and flags them
+//! (informational; does not remove reads). The endogenous-vs-exogenous
+//! classifier that previously consumed these flags was decommissioned
+//! (see EVE_DISCRIMINATION_REDESIGN.md); the alignment-based EVE screen
+//! (minimap2 + DIAMOND competitive EVE-vs-exogenous) is its replacement.
 
 use crate::modules::{AtomicStats, ModuleReport, QcModule};
 use crate::pipeline::AnnotatedRecord;
@@ -23,17 +22,23 @@ const MIN_RETROVIRAL_FRACTION: f64 = 0.15;
 #[path = "erv_sequences.rs"]
 pub(crate) mod erv_sequences;
 
-/// ERV analysis module -- screens reads for retroviral k-mer content
+/// Non-retroviral EVE reference sequences (Bornaviridae, Parvoviridae, Filoviridae).
+#[path = "eve_sequences_nonretro.rs"]
+pub(crate) mod eve_sequences;
+
+/// EVE/ERV analysis module -- screens reads for viral k-mer content
 ///
 /// Unlike other QcModule implementations, this module does NOT remove reads.
-/// It flags reads with retroviral signal for downstream analysis.
-/// The flag "retroviral_signal" is informational, not a failure condition.
+/// It flags reads with viral signal for downstream classification.
+/// Covers Retroviridae (original) plus Bornaviridae, Parvoviridae, Filoviridae.
 pub struct ErvScreener {
-    /// K-mer index of retroviral sequences
+    /// Unified k-mer index (all viral families)
     retroviral_index: FxHashSet<u64>,
+    /// Per-family k-mer sub-indices for family assignment
+    family_indices: Vec<(&'static str, FxHashSet<u64>)>,
     /// Stats
     stats: AtomicStats,
-    /// Reads with retroviral signal
+    /// Reads with retroviral/viral signal
     retroviral_reads: AtomicU64,
 }
 
@@ -117,35 +122,93 @@ const ERV_HERPES_SHARED: &[u64] = &[
 ];
 
 impl ErvScreener {
-    /// Build the retroviral k-mer index from embedded sequences
+    /// Build the unified viral k-mer index from all embedded sequences.
+    /// Includes Retroviridae (original) plus Bornaviridae, Parvoviridae, Filoviridae.
     pub fn new() -> Self {
         let mut index = FxHashSet::default();
+        let mut family_indices: Vec<(&str, FxHashSet<u64>)> = Vec::new();
 
+        // Retroviridae (existing)
+        let mut retro_idx = FxHashSet::default();
         for seq in erv_sequences::RETROVIRAL_SEQUENCES {
             add_sequence_kmers(seq, ERV_K, &mut index);
+            add_sequence_kmers(seq, ERV_K, &mut retro_idx);
         }
+        family_indices.push(("Retroviridae", retro_idx));
 
         // Remove k-mers shared with herpesvirus genomes to prevent
         // false-positive retroviral flagging on herpesvirus reads
-        // (DNA polymerase / reverse transcriptase domain homology)
         let before = index.len();
         for &shared_hash in ERV_HERPES_SHARED {
             index.remove(&shared_hash);
         }
-        let removed = before - index.len();
+        let herpes_removed = before - index.len();
 
-        log::debug!(
-            "ERV retroviral index: {} unique k-mers from {} sequences ({} herpes-shared removed)",
+        // Non-retroviral EVE families
+        for &(name, seq) in eve_sequences::ALL_EVE_SEQUENCES {
+            let family = name.split(':').next().unwrap_or("unknown");
+            add_sequence_kmers(seq, ERV_K, &mut index);
+
+            // Add to family-specific index
+            if let Some((_, ref mut fam_idx)) = family_indices.iter_mut().find(|(f, _)| *f == family) {
+                add_sequence_kmers(seq, ERV_K, fam_idx);
+            } else {
+                let mut fam_idx = FxHashSet::default();
+                add_sequence_kmers(seq, ERV_K, &mut fam_idx);
+                family_indices.push((
+                    // Leak the family string since we need 'static lifetime
+                    // Safe because these are compile-time constants from the embedded sequences
+                    Box::leak(family.to_string().into_boxed_str()),
+                    fam_idx,
+                ));
+            }
+        }
+
+        let eve_families: Vec<String> = family_indices
+            .iter()
+            .map(|(name, idx)| format!("{} ({})", name, idx.len()))
+            .collect();
+
+        log::info!(
+            "EVE/ERV screening index: {} unique k-mers ({} herpes-shared removed). Families: {}",
             index.len(),
-            erv_sequences::RETROVIRAL_SEQUENCES.len(),
-            removed,
+            herpes_removed,
+            eve_families.join(", "),
         );
 
         Self {
             retroviral_index: index,
+            family_indices,
             stats: AtomicStats::new(),
             retroviral_reads: AtomicU64::new(0),
         }
+    }
+
+    /// Determine which viral family a read most likely belongs to
+    /// based on k-mer hits against family-specific sub-indices.
+    /// Returns the family name with the highest containment.
+    pub fn dominant_family(&self, sequence: &[u8]) -> Option<&'static str> {
+        if sequence.len() < ERV_K || self.family_indices.is_empty() {
+            return None;
+        }
+
+        let mut best_family = None;
+        let mut best_hits = 0u32;
+
+        for &(family_name, ref fam_idx) in &self.family_indices {
+            let mut hits = 0u32;
+            for kmer in sequence.windows(ERV_K) {
+                if fam_idx.contains(&hash_kmer(kmer)) {
+                    hits += 1;
+                }
+            }
+            if hits > best_hits {
+                best_hits = hits;
+                best_family = Some(family_name);
+            }
+        }
+
+        best_family
     }
 
     /// Compute retroviral k-mer containment of a read
@@ -185,11 +248,19 @@ impl QcModule for ErvScreener {
 
     fn report(&self) -> ModuleReport {
         let retroviral = self.retroviral_reads.load(Ordering::Relaxed);
+        let families: serde_json::Value = self
+            .family_indices
+            .iter()
+            .map(|(name, idx)| (name.to_string(), serde_json::json!(idx.len())))
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into();
+
         self.stats.to_report(
             self.name(),
             serde_json::json!({
                 "retroviral_reads_flagged": retroviral,
                 "index_size": self.retroviral_index.len(),
+                "family_index_sizes": families,
             }),
         )
     }
@@ -240,38 +311,6 @@ fn add_sequence_kmers(seq: &[u8], k: usize, set: &mut FxHashSet<u64>) {
         set.insert(hash_kmer(kmer));
         set.insert(hash_kmer_rc(kmer));
     }
-}
-
-/// CpG observed/expected ratio for a sequence
-/// Values <0.5 indicate endogenous (methylation-driven CpG depletion)
-/// Values >0.8 indicate exogenous (no host methylation history)
-pub fn cpg_ratio(seq: &[u8]) -> f64 {
-    if seq.len() < 2 {
-        return 0.0;
-    }
-
-    let mut cpg_count = 0u64;
-    let mut c_count = 0u64;
-    let mut g_count = 0u64;
-    let n = seq.len() as u64;
-
-    for i in 0..seq.len() {
-        let b = seq[i].to_ascii_uppercase();
-        if b == b'C' {
-            c_count += 1;
-            if i + 1 < seq.len() && seq[i + 1].eq_ignore_ascii_case(&b'G') {
-                cpg_count += 1;
-            }
-        } else if b == b'G' {
-            g_count += 1;
-        }
-    }
-
-    if c_count == 0 || g_count == 0 {
-        return 0.0;
-    }
-
-    (cpg_count as f64 * n as f64) / (c_count as f64 * g_count as f64)
 }
 
 #[cfg(test)]
@@ -325,21 +364,5 @@ mod tests {
         let mut record = make_record(&random);
         screener.process(&mut record);
         assert!(!record.is_flagged(), "Random read should not be flagged");
-    }
-
-    #[test]
-    fn test_cpg_ratio_high_cpg() {
-        // Sequence with many CpGs (exogenous-like)
-        let seq = b"ACGTCGATCGCGATCGACGT";
-        let ratio = cpg_ratio(seq);
-        assert!(ratio > 0.5, "CpG-rich sequence should have high ratio: {ratio}");
-    }
-
-    #[test]
-    fn test_cpg_ratio_depleted() {
-        // Sequence with CpG -> TpG conversion (endogenous-like)
-        let seq = b"ATGTTGATTTGATTTGATTGATTTG";
-        let ratio = cpg_ratio(seq);
-        assert!(ratio < 0.5, "CpG-depleted sequence should have low ratio: {ratio}");
     }
 }

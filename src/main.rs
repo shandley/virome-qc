@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use virome_qc::modules::QcModule;
 
 #[derive(Parser)]
 #[command(name = "virome-qc")]
@@ -20,9 +19,9 @@ enum Commands {
         #[arg(short, long)]
         profile: String,
 
-        /// Input directory or single-end FASTQ file
+        /// Input directory or single-end FASTQ file (optional when -1/-2 are provided)
         #[arg(short, long)]
-        input: PathBuf,
+        input: Option<PathBuf>,
 
         /// Output directory for clean reads and QA passport
         #[arg(short, long)]
@@ -44,13 +43,21 @@ enum Commands {
         #[arg(long, default_value = "false")]
         report_only: bool,
 
+        /// Overwrite existing results in output directory
+        #[arg(long, default_value = "false")]
+        force: bool,
+
         /// Number of threads
         #[arg(short, long, default_value = "4")]
         threads: usize,
     },
 
     /// List available QC profiles
-    Profiles,
+    Profiles {
+        /// Show full parameters for a specific profile
+        #[arg(long)]
+        show: Option<String>,
+    },
 
     /// Generate synthetic test corpus with ground truth labels
     Corpus {
@@ -81,9 +88,13 @@ enum Commands {
 
     /// Scan FASTQ files to detect platform, characteristics, and potential issues
     Ingest {
-        /// Forward reads (or single-end file)
+        /// Input FASTQ file (single-end or R1)
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+
+        /// Forward reads (or single-end file). Alias for --input.
         #[arg(short = '1', long)]
-        r1: PathBuf,
+        r1: Option<PathBuf>,
 
         /// Reverse reads (paired-end)
         #[arg(short = '2', long)]
@@ -174,14 +185,50 @@ fn main() -> Result<()> {
             r2,
             merge,
             report_only,
+            force,
             threads,
         } => {
+            // Input validation: require either -i or -1/-2
+            let primary_input = match (&r1, &input) {
+                (Some(r1_path), _) => r1_path.clone(),
+                (None, Some(input_path)) => input_path.clone(),
+                (None, None) => {
+                    anyhow::bail!(
+                        "No input specified. Provide -i <file_or_dir> or -1 <R1> -2 <R2>."
+                    );
+                }
+            };
+
+            // Validate input files exist
+            if !primary_input.exists() {
+                anyhow::bail!(
+                    "Input file not found: {}",
+                    primary_input.display()
+                );
+            }
+            if let Some(ref r2_path) = r2 {
+                if !r2_path.exists() {
+                    anyhow::bail!(
+                        "R2 file not found: {}",
+                        r2_path.display()
+                    );
+                }
+            }
+
+            // Output directory overwrite protection
+            if output.join("passport.json").exists() && !force {
+                anyhow::bail!(
+                    "Output directory '{}' already contains results (passport.json found). \
+                     Use --force to overwrite.",
+                    output.display()
+                );
+            }
+
             let mut profile_config = virome_qc::Profile::load(&profile)?;
 
             // Run ingestion scan and apply platform-aware overrides
-            let primary_input = r1.as_ref().unwrap_or(&input);
             let mut ingestion_result = None;
-            if let Ok(ingest) = virome_qc::ingest_fastq(primary_input, r2.as_deref()) {
+            if let Ok(ingest) = virome_qc::ingest_fastq(&primary_input, r2.as_deref()) {
                 if let Some(ref plat) = ingest.platform {
                     eprintln!(
                         "Platform: {} | {}bp {} | ~{} reads",
@@ -232,7 +279,7 @@ fn main() -> Result<()> {
                     pipeline.run_paired(&r1_path, &r2_path, &output, merge)?
                 }
                 _ => {
-                    let input_files = discover_fastq_files(&input)?;
+                    let input_files = discover_fastq_files(&primary_input)?;
                     pipeline.run(&input_files, &output)?
                 }
             };
@@ -241,16 +288,8 @@ fn main() -> Result<()> {
             result.ingestion = ingestion_result;
             result.applied_config = Some(final_config);
 
-            // Run ERV analysis on clean reads (post-pipeline)
-            let erv_results = run_erv_analysis(&result, &output);
-
             // Write QA passport and HTML report
-            let mut passport = result.passport();
-
-            // Add ERV analysis results to passport
-            if let Some(erv_data) = erv_results {
-                passport.erv_analysis = Some(erv_data);
-            }
+            let passport = result.passport();
 
             passport.write_json(&output.join("passport.json"))?;
             virome_qc::report::generate_html_report(&passport, &output.join("report.html"))?;
@@ -281,10 +320,15 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Commands::Profiles => {
-            println!("Available QC profiles:");
-            for name in virome_qc::Profile::list_available() {
-                println!("  {name}");
+        Commands::Profiles { show } => {
+            if let Some(name) = show {
+                let config = virome_qc::Profile::load(&name)?;
+                println!("{}", serde_yaml::to_string(&config)?);
+            } else {
+                println!("Available QC profiles:");
+                for (name, desc) in virome_qc::Profile::list_with_descriptions() {
+                    println!("  {name:30} {desc}");
+                }
             }
         }
         Commands::Corpus {
@@ -343,8 +387,14 @@ fn main() -> Result<()> {
             };
             summary.print_report();
         }
-        Commands::Ingest { r1, r2, json } => {
-            let result = virome_qc::ingest_fastq(&r1, r2.as_deref())?;
+        Commands::Ingest { input, r1, r2, json } => {
+            let r1_path = r1.or(input).ok_or_else(|| {
+                anyhow::anyhow!("No input specified. Provide -i <file> or -1 <R1>.")
+            })?;
+            if !r1_path.exists() {
+                anyhow::bail!("Input file not found: {}", r1_path.display());
+            }
+            let result = virome_qc::ingest_fastq(&r1_path, r2.as_deref())?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
@@ -682,170 +732,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Run post-pipeline ERV analysis on clean reads
-fn run_erv_analysis(
-    result: &virome_qc::PipelineResult,
-    output_dir: &std::path::Path,
-) -> Option<serde_json::Value> {
-    // Check if ERV module flagged any retroviral reads
-    let erv_report = result
-        .module_reports
-        .iter()
-        .find(|(name, _)| name == "erv");
-
-    let retroviral_count = erv_report
-        .and_then(|(_, report)| {
-            report
-                .extra
-                .get("retroviral_reads_flagged")
-                .and_then(|v| v.as_u64())
-        })
-        .unwrap_or(0);
-
-    if retroviral_count == 0 {
-        return None;
-    }
-
-    eprintln!(
-        "  ERV analysis: {} retroviral reads detected, classifying...",
-        retroviral_count
-    );
-
-    // Collect retroviral reads from clean output FASTQs
-    let erv_screener = virome_qc::modules::erv::ErvScreener::new();
-    let mut retroviral_reads: Vec<Vec<u8>> = Vec::new();
-
-    // Scan clean output files for retroviral reads
-    for entry in std::fs::read_dir(output_dir).ok()? {
-        let entry = entry.ok()?;
-        let path = entry.path();
-        let fname = path.file_name()?.to_string_lossy();
-        if !fname.starts_with("clean_") && !fname.starts_with("merged") {
-            continue;
-        }
-        if let Some(ext) = path.extension() {
-            if ext != "gz" && ext != "fastq" {
-                continue;
-            }
-        }
-
-        if let Ok(stream) = biometal::FastqStream::from_path(&path) {
-            for record in stream.flatten() {
-                let mut ann = virome_qc::pipeline::AnnotatedRecord::new(record);
-                erv_screener.process(&mut ann);
-                if ann.metrics.retroviral_signal {
-                    retroviral_reads.push(ann.record.sequence);
-                }
-            }
-        }
-    }
-
-    if retroviral_reads.is_empty() {
-        return Some(serde_json::json!({
-            "retroviral_reads_flagged": retroviral_count,
-            "retroviral_reads_collected": 0,
-            "clusters": [],
-            "summary": "No retroviral reads found in clean output"
-        }));
-    }
-
-    // Build reference panels
-    let sketch_config = biometal::operations::sketching::SketchConfig::new()
-        .with_k(15)
-        .with_sketch_size(1000);
-
-    let exo_panel = virome_qc::modules::erv_pipeline::build_exo_panel(&sketch_config);
-
-    // Try to load Dfam ERV panel if available
-    let erv_panel_path = output_dir
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("references/dfam/herv_consensus.fa");
-
-    let erv_panel = if erv_panel_path.exists() {
-        virome_qc::modules::erv_pipeline::load_erv_panel(&erv_panel_path, &sketch_config)
-    } else {
-        // Fall back to using the exogenous panel as both (less discriminatory)
-        virome_qc::modules::erv_pipeline::build_exo_panel(&sketch_config)
-    };
-
-    // Run classification
-    let config = virome_qc::modules::erv_pipeline::ErvAnalysisConfig {
-        sketch_size: 1000,
-        sketch_k: 15,
-        min_cluster_size: 3,
-        genomic_depth: result.reads_input as f64 / 100_000.0, // rough estimate
-    };
-
-    let classifications =
-        virome_qc::modules::erv_pipeline::analyze_erv_reads(
-            &retroviral_reads,
-            &erv_panel,
-            &exo_panel,
-            &config,
-        );
-
-    // Build passport JSON
-    let mut endogenous = 0;
-    let mut ambiguous = 0;
-    let mut exogenous = 0;
-
-    let loci: Vec<serde_json::Value> = classifications
-        .iter()
-        .map(|c| {
-            match c.classification {
-                virome_qc::modules::erv_classifier::ErvClassification::Endogenous => {
-                    endogenous += 1
-                }
-                virome_qc::modules::erv_classifier::ErvClassification::Ambiguous => {
-                    ambiguous += 1
-                }
-                virome_qc::modules::erv_classifier::ErvClassification::Exogenous => {
-                    exogenous += 1
-                }
-            }
-            serde_json::json!({
-                "cluster_id": c.cluster_id,
-                "reads": c.read_count,
-                "best_match": c.best_match,
-                "orf_intact": c.intact_orfs,
-                "orf_score": c.orf_score,
-                "cpg_ratio": c.cpg_ratio,
-                "cpg_score": c.cpg_score,
-                "nearest_erv": c.nearest_erv,
-                "dist_erv": c.dist_erv,
-                "nearest_exo": c.nearest_exo,
-                "dist_exo": c.dist_exo,
-                "minhash_score": c.minhash_score,
-                "combined_score": c.combined_score,
-                "classification": format!("{:?}", c.classification),
-                "depth_ratio": c.depth_ratio,
-            })
-        })
-        .collect();
-
-    eprintln!(
-        "  ERV analysis: {} clusters ({} endogenous, {} ambiguous, {} exogenous)",
-        classifications.len(),
-        endogenous,
-        ambiguous,
-        exogenous
-    );
-
-    Some(serde_json::json!({
-        "retroviral_reads_flagged": retroviral_count,
-        "retroviral_reads_collected": retroviral_reads.len(),
-        "clusters_total": classifications.len(),
-        "classifications": {
-            "endogenous": endogenous,
-            "ambiguous": ambiguous,
-            "exogenous": exogenous,
-        },
-        "loci": loci,
-    }))
-}
-
 fn discover_fastq_files(dir: &std::path::Path) -> Result<Vec<PathBuf>> {
+    if !dir.exists() {
+        anyhow::bail!("Input path does not exist: {}", dir.display());
+    }
     let mut files = Vec::new();
     if dir.is_file() {
         files.push(dir.to_path_buf());
@@ -861,6 +751,12 @@ fn discover_fastq_files(dir: &std::path::Path) -> Result<Vec<PathBuf>> {
             }
         }
         files.sort();
+    }
+    if files.is_empty() {
+        anyhow::bail!(
+            "No FASTQ files found in: {}",
+            dir.display()
+        );
     }
     Ok(files)
 }

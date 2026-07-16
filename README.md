@@ -33,7 +33,7 @@ virome-qc addresses all of these with a single, opinionated pipeline that produc
 - **Gzip I/O** for both input and output
 - **Parallel processing** via Rayon (160K+ reads/sec on Apple Silicon)
 - **Synthetic test corpus generator** with ground truth labels for benchmarking
-- **ERV analysis** classifies retroviral reads as endogenous (polymorphic HERV) or exogenous (active infection) using three-signal classifier (CpG depletion + MinHash + ORF integrity)
+- **Retroviral read detection** flags reads with retroviral and HERV k-mer content (with herpesvirus k-mer exclusion to prevent false positives), reported in the passport. Endogenous-vs-exogenous discrimination is being rebuilt as an alignment-based competitive screen and is not part of the shipped pipeline.
 - **Validated on 27 datasets** (12 real public + 12 ViroForge reference + 3 ViroForge benchmarks) across 6 sequencing platforms, 5 library preps, and 5 sample types
 - **Head-to-head with fastp**: virome-qc keeps more viral reads on clean data (+4.3%) and removes more contaminants on dirty data (-6.8%)
 
@@ -167,7 +167,7 @@ Modules run in this order:
 7. **Contaminant screening** -- k-mer containment against PhiX174 (with Microviridae exclusion to prevent gut phage false positives) and cloning vectors (pUC19). Paired-end concordant flagging (if one mate is contaminant, the other is removed too).
 8. **rRNA screening** -- SILVA-based sorted hash filter (165M FNV-1a hashes at k=21) for high-sensitivity rRNA detection across prokaryotic and eukaryotic species. Falls back to consensus k-mer screener when SILVA filter is not available. See [rRNA screening](#rrna-screening) below.
 9. **Host depletion** -- Super Bloom k-mer containment screening against a pre-built host genome filter (T2T-CHM13). Three-way classification: host (>50% containment, removed), ambiguous (20-50%, written to separate file), not host (<20%, kept). Containment distribution reported in passport for transparency. Zero viral false positive rate at 50% threshold (verified with ground truth). Enabled by default.
-10. **ERV analysis** -- Post-pipeline retroviral k-mer screen (101 references: 46 Retroviridae + 55 HERV consensus) with herpesvirus k-mer exclusion to prevent false positives. Classifies clusters as endogenous (polymorphic ERV, CpG-depleted) or exogenous (active infection, intact CpG) using three signals: ORF integrity, CpG depletion ratio, and MinHash distance. Reports per-locus classification in the passport. First virome QC tool with automated ERV vs exogenous retrovirus classification.
+10. **Retroviral read detection** -- Post-pipeline k-mer screen against Retroviridae and HERV reference sequences, with herpesvirus k-mer exclusion to prevent false positives. Flags reads with retroviral content in the passport (informational; does not remove reads). Endogenous-vs-exogenous discrimination is under redesign as an alignment-based competitive screen (minimap2 + DIAMOND against endogenous HERV and exogenous virus references) and is not part of the shipped pipeline; see EVE_DISCRIMINATION_REDESIGN.md.
 11. **Length filtering** -- Final safety net for reads shortened by cumulative trimming across all modules.
 
 The ordering is intentional. Adapters must be removed first (non-biological sequence). Poly-X runs before quality trimming because NovaSeq poly-G artifacts have high quality scores and would survive Q-score-based trimming. Contaminant screening and host depletion run after all read cleaning to prevent adapter/quality artifacts from causing false classifications. Length filtering is last as a safety net.
@@ -189,6 +189,17 @@ Every run produces a `passport.json` containing:
 - **Flags**: contextual warnings with dominant cause identification (e.g., "Only 33% of unique reads survived QC -- largest contributor: host (22%)")
 
 The passport is designed for both human review and programmatic consumption. Downstream tools can parse it to make decisions about sample inclusion or flag batch effects.
+
+### Key passport fields
+
+| Field | Definition |
+|-------|-----------|
+| `survival_rate` | `reads_passed / reads_input`. Overall fraction of reads surviving all QC modules **including deduplication**. May be low for amplified libraries (MDA, WGA) due to high duplication — this reflects library complexity, not data quality. |
+| `qc_survival_rate` | `(unique_reads - qc_failed) / unique_reads`. Fraction of **unique** reads that passed quality modules (excluding dedup). This is the data-quality metric: a sample with 60% duplication but 97% QC survival has low library complexity but excellent data quality. |
+| `unique_reads` | `reads_input - dedup_removed`. Total reads minus duplicates. |
+| `quality_tier` | PASS/WARN/FAIL based on `qc_survival_rate` against the profile's `min_survival_rate` threshold. Duplication alone does **not** trigger FAIL. |
+
+**Why two survival metrics?** MDA-amplified and low-input libraries routinely produce 50-70% duplicate reads. If `survival_rate` (which includes dedup) determined PASS/FAIL, these libraries would always fail QC even when the underlying data quality is excellent. `qc_survival_rate` isolates data quality from library preparation characteristics.
 
 ## HTML report
 
@@ -269,7 +280,7 @@ Performance includes loading the SILVA rRNA filter (1.3 GB, 165M k-mers) and T2T
 | Clean VLP virome (Shkoporov) | 93.3% survival | **97.6% survival** (+4.3% more viral reads kept) |
 | Contaminated virome (Zhang) | 79.8% survival | **73.0% survival** (-6.8% more contaminants removed) |
 | rRNA/host/PhiX detection | No | Yes |
-| ERV classification | No | Yes |
+| Retroviral read detection | No | Yes |
 | Data-driven thresholds | No | Yes (ingestion engine) |
 
 On clean VLP data, fastp over-filters with fixed quality thresholds. On contaminated data, fastp passes through rRNA, host DNA, and PhiX that virome-qc removes. virome-qc's ingestion engine adapts thresholds to the data, producing more appropriate filtering for each sample.

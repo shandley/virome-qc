@@ -1,7 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { fmt, pct } from "@/lib/utils";
-import type { Passport, Histogram, ErvAnalysis, ErvLocus } from "@/types";
+import type { Passport, Histogram, ExpectedRanges } from "@/types";
+import { getExpectedRanges } from "@/types";
 import {
   AreaChart,
   Area,
@@ -65,6 +66,39 @@ const tooltipStyle = {
   fontSize: 12,
 };
 
+// -- Range helpers --
+
+type RangeStatus = "in-range" | "near-edge" | "out-of-range" | "unknown";
+
+/** Check where a value falls relative to an expected range. */
+function rangeStatus(
+  value: number,
+  range: [number, number] | undefined,
+  /** How much to expand the range for "near-edge" (fraction of range width). Default 0.2 */
+  edgeFraction = 0.2,
+): RangeStatus {
+  if (!range) return "unknown";
+  const [lo, hi] = range;
+  if (value >= lo && value <= hi) return "in-range";
+  const span = Math.max(hi - lo, 0.001);
+  const edge = span * edgeFraction;
+  if (value >= lo - edge && value <= hi + edge) return "near-edge";
+  return "out-of-range";
+}
+
+function rangeColor(status: RangeStatus): string | undefined {
+  switch (status) {
+    case "in-range": return "var(--chart-3)";
+    case "near-edge": return "var(--chart-4)";
+    case "out-of-range": return "var(--destructive)";
+    default: return undefined;
+  }
+}
+
+function rangePct(range: [number, number]): string {
+  return `${(range[0] * 100).toFixed(1)}-${(range[1] * 100).toFixed(1)}%`;
+}
+
 // -- Stat Cards --
 
 function StatCard({
@@ -72,18 +106,27 @@ function StatCard({
   label,
   sub,
   color,
+  range,
+  observed,
 }: {
   value: string;
   label: string;
   sub?: string;
   color?: string;
+  /** Expected range [min, max] as fractions (0-1). When provided, shows annotation and auto-colors. */
+  range?: [number, number];
+  /** The observed numeric value (fraction) to check against range. */
+  observed?: number;
 }) {
+  const status = observed !== undefined ? rangeStatus(observed, range) : "unknown";
+  const effectiveColor = color ?? (status !== "unknown" ? rangeColor(status) : undefined);
+
   return (
     <Card>
       <CardContent className="p-4 text-center">
         <div
           className="text-2xl font-bold font-mono"
-          style={color ? { color } : undefined}
+          style={effectiveColor ? { color: effectiveColor } : undefined}
         >
           {value}
         </div>
@@ -92,6 +135,11 @@ function StatCard({
         </div>
         {sub && (
           <div className="text-[10px] text-muted-foreground mt-1">{sub}</div>
+        )}
+        {range && (
+          <div className="text-[9px] text-muted-foreground/70 mt-0.5">
+            expected {rangePct(range)}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -207,13 +255,19 @@ function QualityProfileChart({
   positions,
   title,
 }: {
-  positions: { position: number; mean: number; median: number; q25: number; q75: number }[];
+  positions: { position: number; count: number; mean: number; median: number; q25: number; q75: number }[];
   title: string;
 }) {
   if (!positions?.length) return null;
 
-  const step = positions.length > 300 ? Math.ceil(positions.length / 300) : 1;
-  const data = positions
+  // Clip positions with very low coverage (< 1% of peak) to avoid noisy tails
+  // from merged reads or sparse data at extreme positions
+  const maxCount = Math.max(...positions.map((p) => p.count));
+  const minCount = Math.max(maxCount * 0.01, 10);
+  const clipped = positions.filter((p) => p.count >= minCount);
+
+  const step = clipped.length > 300 ? Math.ceil(clipped.length / 300) : 1;
+  const data = clipped
     .filter((_, i) => i % step === 0)
     .map((p) => ({
       ...p,
@@ -299,8 +353,13 @@ function BaseCompositionChart({
 }) {
   if (!positions?.length) return null;
 
-  const step = positions.length > 300 ? Math.ceil(positions.length / 300) : 1;
-  const data = positions
+  // Clip positions with very low coverage to avoid noisy tails
+  const maxTotal = Math.max(...positions.map((p) => p.a + p.c + p.g + p.t + p.n));
+  const minTotal = Math.max(maxTotal * 0.01, 10);
+  const clipped = positions.filter((p) => p.a + p.c + p.g + p.t + p.n >= minTotal);
+
+  const step = clipped.length > 300 ? Math.ceil(clipped.length / 300) : 1;
+  const data = clipped
     .filter((_, i) => i % step === 0)
     .map((p) => {
       const total = p.a + p.c + p.g + p.t + p.n;
@@ -343,196 +402,13 @@ function BaseCompositionChart({
   );
 }
 
-// -- ERV Analysis --
-
-function classificationColor(cls: string): string {
-  switch (cls) {
-    case "Endogenous": return "var(--chart-3)";
-    case "Exogenous": return "var(--destructive)";
-    default: return "var(--chart-4)";
-  }
-}
-
-function ErvAnalysisCard({ erv, readsInput }: { erv: ErvAnalysis; readsInput: number }) {
-  const { classifications: cls, loci } = erv;
-  const totalClassified = cls.endogenous + cls.ambiguous + cls.exogenous;
-  const ervFrac = erv.retroviral_reads_flagged / Math.max(readsInput, 1);
-
-  // Sort loci: exogenous first, then ambiguous, then endogenous, by reads desc
-  const sortedLoci = [...loci].sort((a, b) => {
-    const order = { Exogenous: 0, Ambiguous: 1, Endogenous: 2 };
-    const oa = order[a.classification] ?? 1;
-    const ob = order[b.classification] ?? 1;
-    return oa !== ob ? oa - ob : b.reads - a.reads;
-  });
-
-  // Only show top loci (up to 20)
-  const displayLoci = sortedLoci.slice(0, 20);
-  const hasMore = sortedLoci.length > 20;
-
-  // Prepare data for classification donut-style summary
-  const classData = [
-    { label: "Endogenous", count: cls.endogenous, color: "var(--chart-3)" },
-    { label: "Ambiguous", count: cls.ambiguous, color: "var(--chart-4)" },
-    { label: "Exogenous", count: cls.exogenous, color: "var(--destructive)" },
-  ];
-
-  // CpG distribution for bar chart
-  const cpgBins: number[] = new Array(10).fill(0);
-  for (const l of loci) {
-    const bin = Math.min(Math.floor(l.cpg_ratio * 10), 9);
-    cpgBins[bin] += l.reads;
-  }
-  const cpgData = cpgBins.map((count, i) => ({
-    bin: (i * 0.1).toFixed(1),
-    count,
-  }));
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2">
-          Retroviral Analysis
-          {cls.exogenous > 0 && (
-            <Badge variant="fail" className="text-[10px]">
-              {cls.exogenous} exogenous
-            </Badge>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Summary stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="text-center p-3 rounded-md bg-muted/50">
-            <div className="text-lg font-bold font-mono">{fmt(erv.retroviral_reads_flagged)}</div>
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase">Retroviral Reads</div>
-            <div className="text-[10px] text-muted-foreground">{pct(ervFrac)} of input</div>
-          </div>
-          <div className="text-center p-3 rounded-md bg-muted/50">
-            <div className="text-lg font-bold font-mono">{erv.clusters_total}</div>
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase">Clusters</div>
-            <div className="text-[10px] text-muted-foreground">{totalClassified} classified</div>
-          </div>
-          {classData.map(({ label, count, color }) => (
-            <div key={label} className="text-center p-3 rounded-md bg-muted/50">
-              <div className="text-lg font-bold font-mono" style={{ color }}>{count}</div>
-              <div className="text-[10px] font-semibold text-muted-foreground uppercase">{label}</div>
-              <div className="text-[10px] text-muted-foreground">
-                {totalClassified > 0 ? pct(count / totalClassified) : "0%"} of clusters
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Classification bar */}
-        {totalClassified > 0 && (
-          <div className="space-y-1">
-            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Classification Distribution</div>
-            <div className="flex h-5 rounded-full overflow-hidden bg-muted">
-              {classData.map(({ label, count, color }) => {
-                const w = (count / totalClassified) * 100;
-                if (w === 0) return null;
-                return (
-                  <div
-                    key={label}
-                    className="h-full flex items-center justify-center text-[9px] font-semibold text-white"
-                    style={{ width: `${w}%`, backgroundColor: color, minWidth: w > 5 ? undefined : 4 }}
-                    title={`${label}: ${count} (${w.toFixed(1)}%)`}
-                  >
-                    {w > 15 ? `${label} ${count}` : w > 8 ? `${count}` : ""}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* CpG distribution */}
-        {loci.length > 0 && (
-          <div>
-            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              CpG Observed/Expected (reads by ratio)
-            </div>
-            <ResponsiveContainer width="100%" height={140}>
-              <BarChart data={cpgData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                <XAxis dataKey="bin" tick={{ fontSize: 10 }} className="fill-muted-foreground" />
-                <YAxis tick={{ fontSize: 10 }} className="fill-muted-foreground" tickFormatter={fmtAxis} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [value.toLocaleString(), "Reads"]} />
-                <Bar
-                  dataKey="count"
-                  radius={[2, 2, 0, 0]}
-                  opacity={0.85}
-                  fill="var(--chart-2)"
-                />
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="text-[10px] text-muted-foreground mt-1">
-              CpG &lt; 0.4 = endogenous (methylation-depleted). CpG &gt; 0.8 = exogenous (intact).
-            </div>
-          </div>
-        )}
-
-        {/* Loci table */}
-        {displayLoci.length > 0 && (
-          <div className="overflow-x-auto">
-            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              Top Clusters
-            </div>
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-1.5 px-2 font-semibold text-muted-foreground">Match</th>
-                  <th className="text-center py-1.5 px-2 font-semibold text-muted-foreground">Class</th>
-                  <th className="text-right py-1.5 px-2 font-semibold text-muted-foreground">Reads</th>
-                  <th className="text-right py-1.5 px-2 font-semibold text-muted-foreground">CpG O/E</th>
-                  <th className="text-right py-1.5 px-2 font-semibold text-muted-foreground">Score</th>
-                  <th className="text-right py-1.5 px-2 font-semibold text-muted-foreground">ORFs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayLoci.map((l) => (
-                  <tr key={l.cluster_id} className="border-b border-border/50 hover:bg-muted/30">
-                    <td className="py-1.5 px-2 font-medium truncate max-w-[160px]" title={l.best_match}>
-                      {l.best_match === "unknown" ? "—" : l.best_match}
-                    </td>
-                    <td className="py-1.5 px-2 text-center">
-                      <span
-                        className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                        style={{
-                          color: classificationColor(l.classification),
-                          backgroundColor: `color-mix(in srgb, ${classificationColor(l.classification)} 15%, transparent)`,
-                        }}
-                      >
-                        {l.classification}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-2 text-right font-mono">{l.reads}</td>
-                    <td className="py-1.5 px-2 text-right font-mono">{l.cpg_ratio.toFixed(2)}</td>
-                    <td className="py-1.5 px-2 text-right font-mono">{l.combined_score.toFixed(2)}</td>
-                    <td className="py-1.5 px-2 text-right font-mono">{l.orf_intact}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {hasMore && (
-              <div className="text-[10px] text-muted-foreground mt-1">
-                Showing top 20 of {sortedLoci.length} clusters
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 // -- Main Report --
 
 export function SampleReport({ passport }: { passport: Passport }) {
   const p = passport;
   const ri = Math.max(p.reads_input, 1);
   const qa = p.qa_stats;
+  const er = getExpectedRanges(p);
 
   const getModuleExtra = (name: string, key: string) => {
     const m = p.modules.find((m) => m.name === name);
@@ -555,10 +431,14 @@ export function SampleReport({ passport }: { passport: Passport }) {
     ? histMean(qa.distributions.gc_content)
     : null;
 
+  // QC survival (dedup-excluded) — the meaningful quality metric
+  const qcSurvival = p.qc_survival_rate ?? p.survival_rate;
+
   const basesIn = qa?.summary?.bases_input || 0;
   const basesOut = qa?.summary?.bases_output || 0;
   const libraryComplexity = qa?.duplication?.estimated_library_complexity || 0;
   const hasPaired = (p.pairs_passed ?? 0) > 0;
+  const dupRate = qa?.duplication?.estimated_duplication_rate;
 
   return (
     <div className="space-y-6">
@@ -575,10 +455,11 @@ export function SampleReport({ passport }: { passport: Passport }) {
           sub={basesOut > 0 ? fmtBases(basesOut) : `${p.reads_passed.toLocaleString()} reads`}
         />
         <StatCard
-          value={pct(p.survival_rate)}
-          label="Survival"
-          sub={`${fmt(p.reads_input - p.reads_passed)} removed`}
-          color={p.quality_tier === "FAIL" ? "var(--destructive)" : p.quality_tier === "WARN" ? "var(--chart-4)" : "var(--chart-3)"}
+          value={pct(qcSurvival)}
+          label="QC Survival"
+          sub={p.qc_survival_rate != null ? `${pct(p.survival_rate)} overall` : `${fmt(p.reads_input - p.reads_passed)} removed`}
+          range={er?.survival}
+          observed={qcSurvival}
         />
         {meanReadLen !== null && (
           <StatCard
@@ -599,6 +480,8 @@ export function SampleReport({ passport }: { passport: Passport }) {
           <StatCard
             value={`${(meanGC * 100).toFixed(1)}%`}
             label="Mean GC"
+            range={er?.gc_content}
+            observed={meanGC}
           />
         )}
       </div>
@@ -613,11 +496,13 @@ export function SampleReport({ passport }: { passport: Passport }) {
             color={p.contamination_summary.biological_contamination_fraction > 0.10 ? "var(--destructive)" : p.contamination_summary.biological_contamination_fraction > 0.02 ? "var(--chart-4)" : "var(--chart-3)"}
           />
         )}
-        {qa && (
+        {dupRate != null && (
           <StatCard
-            value={pct(qa.duplication.estimated_duplication_rate)}
+            value={pct(dupRate)}
             label="Duplication"
-            sub={`${fmt(qa.duplication.estimated_unique_sequences)} unique`}
+            sub={`${fmt(qa!.duplication.estimated_unique_sequences)} unique`}
+            range={er?.duplication_rate}
+            observed={dupRate}
           />
         )}
         {libraryComplexity > 0 && (
@@ -794,11 +679,14 @@ export function SampleReport({ passport }: { passport: Passport }) {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     <div className="text-center p-3 rounded-md bg-muted/50">
-                      <div className={`text-lg font-bold font-mono ${hostFrac > 0.20 ? "text-destructive" : hostFrac > 0.01 ? "text-chart-4" : "text-chart-3"}`}>
+                      <div className="text-lg font-bold font-mono" style={{ color: rangeColor(rangeStatus(hostFrac, er?.host_fraction)) ?? (hostFrac > 0.20 ? "var(--destructive)" : hostFrac > 0.01 ? "var(--chart-4)" : "var(--chart-3)") }}>
                         {pct(hostFrac)}
                       </div>
                       <div className="text-[10px] font-semibold text-muted-foreground uppercase">Host Reads</div>
                       <div className="text-[10px] text-muted-foreground">{fmt(hostRemoved)} removed</div>
+                      {er?.host_fraction && (
+                        <div className="text-[9px] text-muted-foreground/70">expected {rangePct(er.host_fraction)}</div>
+                      )}
                     </div>
                     <div className="text-center p-3 rounded-md bg-muted/50">
                       <div className="text-lg font-bold font-mono">{fmt(ambiguous)}</div>
@@ -846,11 +734,14 @@ export function SampleReport({ passport }: { passport: Passport }) {
                 </CardHeader>
                 <CardContent>
                   <div className="text-center p-3 rounded-md bg-muted/50">
-                    <div className={`text-lg font-bold font-mono ${rrnaFrac > 0.10 ? "text-destructive" : rrnaFrac > 0.01 ? "text-chart-4" : "text-chart-3"}`}>
+                    <div className="text-lg font-bold font-mono" style={{ color: rangeColor(rangeStatus(rrnaFrac, er?.rrna_fraction)) ?? (rrnaFrac > 0.10 ? "var(--destructive)" : rrnaFrac > 0.01 ? "var(--chart-4)" : "var(--chart-3)") }}>
                       {pct(rrnaFrac)}
                     </div>
                     <div className="text-[10px] font-semibold text-muted-foreground uppercase">rRNA Reads</div>
                     <div className="text-[10px] text-muted-foreground">{fmt(rrnaRemoved)} removed (SILVA)</div>
+                    {er?.rrna_fraction && (
+                      <div className="text-[9px] text-muted-foreground/70">expected {rangePct(er.rrna_fraction)}</div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -859,10 +750,6 @@ export function SampleReport({ passport }: { passport: Passport }) {
         </div>
       )}
 
-      {/* ERV Analysis */}
-      {p.erv_analysis && p.erv_analysis.retroviral_reads_flagged > 0 && (
-        <ErvAnalysisCard erv={p.erv_analysis} readsInput={p.reads_input} />
-      )}
 
       {/* Quality profiles */}
       {qa?.per_position && (

@@ -1,5 +1,13 @@
 # ERV Analysis Module Design
 
+> **SUPERSEDED (2026-07-16).** The three-signal classifier described in this document was
+> implemented, then decommissioned. In practice the ORF and MinHash signals were inert at
+> read length, so classification reduced to CpG depletion alone, which is retrovirus-specific
+> and directionally wrong for chromosomally integrated herpesviruses (ciHHV-6). The problem
+> statement below still stands; the solution has been replaced by the subtract-then-discriminate
+> design with an alignment-based competitive EVE screen. See EVE_DISCRIMINATION_REDESIGN.md and
+> EVE_SCREEN_MODULE.md. This document is retained as historical design context.
+
 ## Problem
 
 After host depletion, virome samples almost always contain retroviral reads. These come from three sources:

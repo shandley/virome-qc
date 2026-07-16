@@ -16,14 +16,14 @@ Virome sequencing spans tissue biopsies (high host) to ocean water (novel divers
 
 ### 2. The tool (virome-qc)
 
-11-module Rust pipeline (24.8K lines, 133 tests) with ingestion engine that auto-tunes all processing parameters from the first 50K reads. Key innovations:
+11-module Rust pipeline (24.8K lines, 123 tests) with ingestion engine that auto-tunes all processing parameters from the first 50K reads. Key innovations:
 - PhiX/Microviridae unique k-mer discrimination (first quantitative solution)
 - SILVA rRNA screening at 78% sensitivity via sorted hash filter (165M 21-mers)
 - Super Bloom host depletion with three-way classification and containment distribution reporting
-- ERV analysis: three-signal classifier (CpG + MinHash + ORF) for endogenous vs exogenous retrovirus discrimination (first in any QC tool), with herpesvirus k-mer exclusion
+- Retroviral read detection: k-mer screen against Retroviridae and HERV references with herpesvirus k-mer exclusion (endogenous-vs-exogenous discrimination is a separate alignment-based competitive screen under development, not shipped; see EVE_DISCRIMINATION_REDESIGN.md)
 - Data-driven parameter setting (complexity, N-filter, quality, adapter overlap)
 - Platform-aware poly-G, bin-aware quality trimming, R2 quality comparison
-- Self-contained React HTML reports with interactive charts, ERV analysis panel, containment histograms
+- Self-contained React HTML reports with interactive charts and containment histograms
 - Contamination summary separating biological (host + rRNA + contaminant) from technical (adapter + quality) removal
 
 ### 3. The methodology (ViroForge loop)
@@ -79,7 +79,7 @@ Reference distributions derived from ViroForge synthetic viromes (20 collections
 
 ### 6. Future directions
 
-**Clinical diagnostics mode**: The ERV endogenous/exogenous classifier is already a diagnostic-grade feature — it answers "is this retroviral signal from the patient's germline or an active infection?" A `--clinical` flag would tighten thresholds across all modules (stricter quality, mandatory dedup, conservative merging, expanded contaminant database) and add negative control comparison (`--blank`). Key additions: negative control subtraction, minimum evidence thresholds for pathogen calls, and confidence scoring for ERV classification. Note: rRNA as an extraction validation positive control is only applicable for non-sterile sites (stool, oral, respiratory) — sterile sites (blood, CSF, tissue) would not have rRNA.
+**Clinical diagnostics mode**: A `--clinical` flag would tighten thresholds across all modules (stricter quality, mandatory dedup, conservative merging, expanded contaminant database) and add negative control comparison (`--blank`). Key additions: negative control subtraction and minimum evidence thresholds for pathogen calls. Distinguishing germline retroviral signal (endogenous HERV) from active infection is a goal of the alignment-based EVE discrimination screen under development (see EVE_DISCRIMINATION_REDESIGN.md), not a shipped feature. Note: rRNA as an extraction validation positive control is only applicable for non-sterile sites (stool, oral, respiratory) — sterile sites (blood, CSF, tissue) would not have rRNA.
 
 **Probe-capture virome support**: Probe-capture/target-enrichment data requires fundamentally different QC metrics (on-target rate, enrichment fold, coverage uniformity) that are alignment-based rather than k-mer-based. This is a separate modality requiring panel BED files and a distinct reporting framework, best addressed as a v2 expansion or companion tool.
 

@@ -12,6 +12,7 @@
 //! with the findere consistency scheme.
 
 use crate::config::HostConfig;
+use crate::modules::eve_exclusion::EveExclusionSet;
 use crate::modules::{AtomicStats, ModuleReport, QcModule};
 use crate::pipeline::AnnotatedRecord;
 use std::path::Path;
@@ -26,12 +27,16 @@ pub struct HostFilter {
     host_threshold: f64,
     /// Minimum containment fraction to flag as ambiguous
     ambiguous_threshold: f64,
+    /// EVE k-mer exclusion set (when eve_aware=true)
+    eve_exclusion: Option<EveExclusionSet>,
     /// Standard stats
     stats: AtomicStats,
     /// Host reads removed
     host_removed: AtomicU64,
     /// Ambiguous reads flagged
     ambiguous_flagged: AtomicU64,
+    /// Reads rescued by EVE exclusion (would have been host without it)
+    eve_rescued: AtomicU64,
     /// Containment distribution histogram: 10 bins (0-10%, 10-20%, ..., 90-100%)
     /// Only counts reads with containment > 0 (skips the vast majority at 0%)
     containment_hist: [AtomicU64; 10],
@@ -51,13 +56,29 @@ impl HostFilter {
             )
         })?;
 
+        // Build EVE exclusion set if eve_aware is enabled
+        let eve_exclusion = if config.eve_aware {
+            let set = EveExclusionSet::build();
+            if set.is_empty() {
+                log::warn!("EVE exclusion enabled but no EVE sequences are embedded. \
+                           Run scripts/build_eve_exclusion.py to generate eve_kmers.rs.");
+                None
+            } else {
+                Some(set)
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             filter: sb,
             host_threshold: config.host_threshold,
             ambiguous_threshold: config.ambiguous_threshold,
+            eve_exclusion,
             stats: AtomicStats::new(),
             host_removed: AtomicU64::new(0),
             ambiguous_flagged: AtomicU64::new(0),
+            eve_rescued: AtomicU64::new(0),
             containment_hist: std::array::from_fn(|_| AtomicU64::new(0)),
             zero_containment: AtomicU64::new(0),
         })
@@ -153,14 +174,51 @@ impl HostFilter {
         Ok(())
     }
 
-    /// Compute k-mer containment fraction for a read
-    fn containment(&self, sequence: &[u8]) -> f64 {
+    /// Compute k-mer containment fraction for a read.
+    ///
+    /// When EVE exclusion is active, k-mers that hit both the host filter
+    /// and the EVE exclusion set are excluded from both numerator and denominator.
+    /// This reduces containment for reads from EVE regions, allowing genuinely
+    /// exogenous viral reads to pass through host depletion.
+    fn containment(&self, sequence: &[u8]) -> (f64, bool) {
         let hits = self.filter.query_sequence(sequence);
         if hits.is_empty() {
-            return 0.0;
+            return (0.0, false);
         }
-        let n_hits = hits.iter().filter(|&&h| h).count();
-        n_hits as f64 / hits.len() as f64
+
+        if let Some(ref eve_set) = self.eve_exclusion {
+            let mut n_hits = 0usize;
+            let mut n_total = 0usize;
+            let mut eve_hits = 0usize;
+
+            for (i, &hit) in hits.iter().enumerate() {
+                let kmer_end = i + 31;
+                if kmer_end > sequence.len() {
+                    break;
+                }
+                let kmer = &sequence[i..kmer_end];
+
+                if hit && eve_set.contains_kmer(kmer) {
+                    // This k-mer is in an EVE region — exclude from calculation
+                    eve_hits += 1;
+                } else {
+                    n_total += 1;
+                    if hit {
+                        n_hits += 1;
+                    }
+                }
+            }
+
+            let containment = if n_total > 0 {
+                n_hits as f64 / n_total as f64
+            } else {
+                0.0
+            };
+            (containment, eve_hits > 0)
+        } else {
+            let n_hits = hits.iter().filter(|&&h| h).count();
+            (n_hits as f64 / hits.len() as f64, false)
+        }
     }
 }
 
@@ -173,7 +231,7 @@ impl QcModule for HostFilter {
             return; // too short for k=31
         }
 
-        let containment = self.containment(seq);
+        let (containment, had_eve_hits) = self.containment(seq);
 
         // Record containment distribution
         if containment > 0.0 {
@@ -190,6 +248,10 @@ impl QcModule for HostFilter {
         } else if containment >= self.ambiguous_threshold {
             record.flag("host_ambiguous");
             self.ambiguous_flagged.fetch_add(1, Ordering::Relaxed);
+        } else if had_eve_hits {
+            // Read had EVE k-mer hits that were excluded, reducing containment
+            // below the host/ambiguous thresholds — this is a rescued read
+            self.eve_rescued.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -200,6 +262,9 @@ impl QcModule for HostFilter {
             .map(|c| c.load(Ordering::Relaxed))
             .collect();
 
+        let eve_rescued = self.eve_rescued.load(Ordering::Relaxed);
+        let eve_active = self.eve_exclusion.is_some();
+
         self.stats.to_report(
             self.name(),
             serde_json::json!({
@@ -207,6 +272,9 @@ impl QcModule for HostFilter {
                 "ambiguous_flagged": self.ambiguous_flagged.load(Ordering::Relaxed),
                 "host_threshold": self.host_threshold,
                 "ambiguous_threshold": self.ambiguous_threshold,
+                "eve_aware": eve_active,
+                "eve_rescued": eve_rescued,
+                "eve_exclusion_kmers": self.eve_exclusion.as_ref().map(|e| e.len()).unwrap_or(0),
                 "containment_distribution": {
                     "bins": ["0-10%", "10-20%", "20-30%", "30-40%", "40-50%",
                              "50-60%", "60-70%", "70-80%", "80-90%", "90-100%"],
@@ -299,15 +367,17 @@ mod tests {
             filter: frozen,
             host_threshold: 0.50,
             ambiguous_threshold: 0.15,
+            eve_exclusion: None,
             stats: AtomicStats::new(),
             host_removed: AtomicU64::new(0),
             ambiguous_flagged: AtomicU64::new(0),
+            eve_rescued: AtomicU64::new(0),
             containment_hist: std::array::from_fn(|_| AtomicU64::new(0)),
             zero_containment: AtomicU64::new(0),
         };
 
         // A read from the reference should have high containment
-        let containment = filter.containment(&ref_seq[10..60]);
+        let (containment, _) = filter.containment(&ref_seq[10..60]);
         assert!(
             containment > 0.5,
             "Reference-derived read should have high containment, got {:.3}",
@@ -318,7 +388,7 @@ mod tests {
         let random: Vec<u8> = (0..50)
             .map(|i| [b'T', b'G', b'C', b'A'][(i * 7 + 3) % 4])
             .collect();
-        let random_containment = filter.containment(&random);
+        let (random_containment, _) = filter.containment(&random);
         assert!(
             random_containment < 0.3,
             "Random read should have low containment, got {:.3}",
@@ -347,9 +417,11 @@ mod tests {
             filter: frozen,
             host_threshold: 0.50,
             ambiguous_threshold: 0.15,
+            eve_exclusion: None,
             stats: AtomicStats::new(),
             host_removed: AtomicU64::new(0),
             ambiguous_flagged: AtomicU64::new(0),
+            eve_rescued: AtomicU64::new(0),
             containment_hist: std::array::from_fn(|_| AtomicU64::new(0)),
             zero_containment: AtomicU64::new(0),
         };

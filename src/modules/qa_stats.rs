@@ -253,6 +253,9 @@ pub struct ReadAnalytics {
 
     // Duplication estimate (HyperLogLog)
     hll: Mutex<HyperLogLog>,
+    // Count of reads actually added to the HLL (may be < reads_input when try_lock
+    // skips under contention). Used as the duplication-rate denominator.
+    hll_samples: AtomicU64,
     // Survival funnel (populated at snapshot time from module reports)
 }
 
@@ -289,6 +292,7 @@ impl ReadAnalytics {
             ],
 
             hll: Mutex::new(HyperLogLog::new(&SketchConfig::default())),
+            hll_samples: AtomicU64::new(0),
         }
     }
 
@@ -301,17 +305,15 @@ impl ReadAnalytics {
         self.quality_before.record(quality);
         self.bases_before.record(sequence);
 
-        // Add to HyperLogLog for duplication estimate.
-        // Sample every 8th read to reduce mutex contention -- HLL estimation
-        // is accurate with subsampling since it's a probabilistic sketch.
-        let count = self.reads_input.load(Ordering::Relaxed);
-        if count % 8 == 0 {
-            let prefix_len = sequence.len().min(50);
-            let read_hash = hash_read_prefix(&sequence[..prefix_len]);
-            if let Ok(mut hll) = self.hll.try_lock() {
-                hll.add_hash(read_hash);
-            }
-            // If lock is contended, skip -- HLL tolerates missing samples
+        // Add every read to the HyperLogLog for the duplication estimate. try_lock
+        // may skip under contention; the duplication rate divides cardinality by
+        // hll_samples (reads actually added), not the full input, so skipped reads
+        // do not inflate the apparent duplication rate.
+        let prefix_len = sequence.len().min(50);
+        let read_hash = hash_read_prefix(&sequence[..prefix_len]);
+        if let Ok(mut hll) = self.hll.try_lock() {
+            hll.add_hash(read_hash);
+            self.hll_samples.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -399,11 +401,14 @@ impl ReadAnalytics {
         let input = self.reads_input.load(Ordering::Relaxed);
         let passed = self.reads_passed.load(Ordering::Relaxed);
 
-        // Duplication estimate from HyperLogLog
+        // Duplication estimate from HyperLogLog. Divide by the number of reads
+        // actually added to the sketch (hll_samples), not the full input, so that
+        // reads skipped on lock contention do not inflate the duplication rate.
         let hll = self.hll.lock().unwrap();
         let estimated_unique = hll.cardinality();
-        let estimated_dup_rate: f64 = if input > 0 && estimated_unique > 0 {
-            1.0 - (estimated_unique as f64 / input as f64)
+        let hll_samples = self.hll_samples.load(Ordering::Relaxed);
+        let estimated_dup_rate: f64 = if hll_samples > 0 && estimated_unique > 0 {
+            1.0 - (estimated_unique as f64 / hll_samples as f64)
         } else {
             0.0
         };

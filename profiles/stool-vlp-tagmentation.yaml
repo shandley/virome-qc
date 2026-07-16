@@ -51,8 +51,11 @@ thresholds:
   max_host_fraction: 0.20
   max_rrna_fraction: 0.05
   max_duplicate_rate: 0.50
+  # ViroForge calibration: 5 datasets, 2026-03-27. Survival is QCSurv (dedup-excluded).
   expected_ranges:
-    survival: [0.95, 0.999]
-    host_fraction: [0.0, 0.005]
-    rrna_fraction: [0.001, 0.02]
-    adapter_rate: [0.001, 0.06]
+    survival: [0.98, 0.997]
+    host_fraction: [0.0, 0.001]
+    rrna_fraction: [0.002, 0.006]
+    adapter_rate: [0.0, 0.05]
+    duplication_rate: [0.05, 0.55]
+    gc_content: [0.35, 0.55]
