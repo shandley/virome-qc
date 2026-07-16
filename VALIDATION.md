@@ -1373,13 +1373,15 @@ The `add_pcr_duplicates()` function loads entire FASTQ files into Python lists. 
 ### Derived Expected Ranges
 
 > **STALE (2026-07-16): these ranges are inconsistent with the current code and must be
-> re-derived from a rerun before use.** Three correctness fixes changed the metrics these
+> re-derived from a rerun before use.** Two correctness fixes changed the metrics these
 > ranges are built on: the QCSurv (qc_survival_rate) numerator was corrected to count
-> concordant-mate removals as failures (lowers survival for host-rich paired data), the
+> concordant-mate removals as failures (lowers survival for host-rich paired data), and the
 > paired deduplication now keys on both mates (removes fewer false duplicates, so
-> duplication_rate drops and survival rises), and the duplication-rate denominator was fixed
-> (the previous estimate was inflated). The `survival` and `duplication_rate` numbers below,
-> and the matching `expected_ranges` in the profiles, will differ once recomputed. See
+> duplication_rate drops and survival rises). The effect is largest on the host-containing
+> profiles (tissue, metagenomics) and small on clean VLP. The `survival` and
+> `duplication_rate` numbers below, and the matching `expected_ranges` in the profiles, will
+> differ once recomputed. (The separate HLL analytics duplication estimate was also fixed but
+> does not affect these ranges, which come from the dedup module's actual counts.) See
 > REVIEW_FINDINGS.md Tier 0-B.
 
 Based on QCSurv (dedup-excluded survival) as the primary metric:

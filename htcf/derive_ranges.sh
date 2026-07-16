@@ -62,12 +62,16 @@ for p in passports:
         # Use adapters_found_3prime (correct), not reads_modified (inflated by primer trimming)
         adapter = am.get("extra", {}).get("adapters_found_3prime", 0) / ri
 
+    # The profile `survival` range is QCSurv (qc_survival_rate: survival of unique
+    # reads, dedup excluded from the denominator), NOT raw survival_rate. The tool
+    # checks qc_survival_rate against this range, so derive it from the same metric.
+    qcsurv = d.get("qc_survival_rate", d["survival_rate"])
     name = os.path.basename(os.path.dirname(p))
-    print(f"    {name}: surv={d['survival_rate']:.4f} host={host:.4f} rrna={rrna:.4f} adapt={adapter:.4f} dedup={dedup:.4f}")
+    print(f"    {name}: qcsurv={qcsurv:.4f} host={host:.4f} rrna={rrna:.4f} adapt={adapter:.4f} dedup={dedup:.4f}")
 
     metrics.append({
         "name": name,
-        "survival": d["survival_rate"],
+        "survival": qcsurv,
         "host_fraction": host,
         "rrna_fraction": rrna,
         "adapter_rate": adapter,
