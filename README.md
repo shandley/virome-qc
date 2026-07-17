@@ -318,7 +318,7 @@ Validated on 28 datasets across 13 real public datasets (6 sequencing platforms,
 
 Key findings:
 - **Zero viral false positive rate** in host depletion at 50% containment threshold (ground truth verified)
-- **ERV-host correlation**: Pearson r=0.871 (p=0.001) — retroviral content tracks host background
+- **ERV-host correlation**: Pearson r=0.871 (p=0.0013, n=11) -- retroviral content tracks host background
 - **Herpesvirus cross-reactivity**: identified and fixed via k-mer exclusion (99.3% FP reduction)
 - **Giant virus assessment**: systematic scan of 40 virus families, only Orthoherpesviridae significant
 - **fastp comparison**: virome-qc preserves more viral reads on clean data, removes more contaminants on dirty data

@@ -40,7 +40,7 @@ ViroForge synthetic ground truth enables quantitative optimization impossible wi
 
 27 datasets: 12 real public, 12 ViroForge reference atlas, 3 ViroForge parameter sweep benchmarks:
 - Zero viral false positive rate in host depletion (ground truth verified with synthetic corpus)
-- ERV-host correlation: Pearson r=0.871 (p=0.001) across 11 real datasets
+- ERV-host correlation: Pearson r=0.871 (p=0.0013) across 11 real datasets
 - Herpesvirus cross-reactivity: systematic scan of 40 virus families, only Orthoherpesviridae significant (194 shared k-mers, fixed with exclusion set)
 - Giant virus assessment: Phycodnaviridae (12-14 shared k-mers) documented as marginal risk for environmental/stool viromes
 - Santos KAPA vs Nextera: 580x rRNA difference from same sample — library prep quality detection

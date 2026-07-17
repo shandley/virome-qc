@@ -864,11 +864,14 @@ The ERV analysis module reveals a strong correlation between retroviral read con
 
 | Comparison | Pearson r | p-value | Spearman rho | p-value |
 |---|---|---|---|---|
-| ERV fraction vs Host level | **0.922** | **0.0004** | **0.727** | **0.014** |
-| log10(ERV fraction) vs Host level | **0.756** | **0.009** | **0.727** | **0.014** |
-| Endogenous clusters vs Host level | **0.733** | **0.013** | 0.591 | 0.058 |
+| ERV fraction vs Host fraction | **0.871** | **0.0013** | 0.482 | 0.1350 |
+| ERV fraction vs Host level | **0.909** | **0.0005** | 0.546 | 0.0841 |
+| log10(ERV fraction) vs Host level | **0.803** | **0.0045** | 0.546 | 0.0841 |
+| Endogenous clusters vs Host level | **0.762** | **0.0084** | **0.728** | 0.0132 |
 
 Host level categories: 0 = VLP-enriched/mock (no host expected), 1 = partially depleted stool/wastewater, 2 = clinical RNA-seq, 3 = clinical WGS.
+
+Values reproduce `scripts/erv_correlation_analysis.py` (benchmark_data/results/erv_correlation_analysis.md). The headline "ERV-host correlation" cited in the README and publication plan is the first row (ERV fraction vs host fraction, r=0.871, p=0.0013). The endogenous-cluster row derives from the now-decommissioned ERV classifier and is retained only as a historical record.
 
 **Group comparison:**
 - VLP-enriched samples (n=5): mean ERV fraction = 0.000029
