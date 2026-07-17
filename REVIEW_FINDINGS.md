@@ -35,12 +35,13 @@ FIXED + verified (build/clippy clean, 121 lib tests incl. 2 new dedup regression
   collapse. Executor paired loop calls process_pair.
 - HLL duplication: added hll_samples counter; every read offered to the sketch and the rate
   divides by reads actually added (robust to try_lock contention), not the full input.
-CALIBRATION NOW STALE (open, publication-relevant): these fixes change reported survival and
-duplication, and the pair-aware dedup lowers PE dedup_removed (fewer false duplicates -> higher
-survival). So the profile expected_ranges and the VALIDATION.md survival/duplication tables are
-now INCONSISTENT with the corrected code (i.e., wrong until re-derived). A rerun + re-derivation
-is required before those numbers are used. Warning banner added at VALIDATION.md "Derived
-Expected Ranges".
+CALIBRATION RE-DERIVED [DONE 2026-07-17]: full rerun on HTCF (ViroForge restored; 20 datasets
+regenerated; corrected binary built + gate-passed with the dedup/survival regressions; derive
+script fixed to use qc_survival_rate). New per-profile expected_ranges written to profiles.rs +
+profiles/stool-vlp-tagmentation.yaml, and VALIDATION.md "Derived Expected Ranges" updated (STALE
+banner lifted). Survival dropped most on host-containing profiles (tissue, metagenomics) as
+predicted -- the survival fix counts concordant-mate removals as failures, which occur in
+host-rich paired data. Clean VLP changed little.
 
 Original finding (all VERIFIED before fixing) below. These matter for publication because the
 reported numbers feed the validation tables and the profile calibration ranges.

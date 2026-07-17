@@ -1372,52 +1372,48 @@ The `add_pcr_duplicates()` function loads entire FASTQ files into Python lists. 
 
 ### Derived Expected Ranges
 
-> **STALE (2026-07-16): these ranges are inconsistent with the current code and must be
-> re-derived from a rerun before use.** Two correctness fixes changed the metrics these
-> ranges are built on: the QCSurv (qc_survival_rate) numerator was corrected to count
-> concordant-mate removals as failures (lowers survival for host-rich paired data), and the
-> paired deduplication now keys on both mates (removes fewer false duplicates, so
-> duplication_rate drops and survival rises). The effect is largest on the host-containing
-> profiles (tissue, metagenomics) and small on clean VLP. The `survival` and
-> `duplication_rate` numbers below, and the matching `expected_ranges` in the profiles, will
-> differ once recomputed. (The separate HLL analytics duplication estimate was also fixed but
-> does not affect these ranges, which come from the dedup module's actual counts.) See
-> REVIEW_FINDINGS.md Tier 0-B.
+> **Re-derived 2026-07-17** from a full rerun: 20 regenerated ViroForge datasets processed by
+> the corrected binary (ERV classifier decommissioned; QC correctness fixes applied), with the
+> `survival` range built from `qc_survival_rate` (what the tool actually checks). These
+> supersede the pre-fix ranges. Compared with the previous QCSurv ranges, survival dropped most
+> on the host-containing profiles (tissue -0.02 to -0.16, metagenomics -0.04 low bound) and
+> changed little on clean VLP, because the survival fix now counts concordant-mate removals as
+> failures and those occur in host-rich paired data. See REVIEW_FINDINGS.md Tier 0-B.
 
-Based on QCSurv (dedup-excluded survival) as the primary metric:
+Based on QCSurv (qc_survival_rate, dedup-excluded survival) as the primary metric:
 
 ```yaml
 # stool-vlp-tagmentation
 expected_ranges:
-  survival: [0.981, 0.997]       # QCSurv, not raw survival
-  host_fraction: [0.0000, 0.0004]
-  rrna_fraction: [0.0020, 0.0060]
-  adapter_rate: [0.0001, 0.0501]
-  duplication_rate: [0.2567, 0.5254]
+  survival: [0.9494, 0.9703]     # QCSurv (qc_survival_rate), not raw survival
+  host_fraction: [0.0001, 0.0007]
+  rrna_fraction: [0.0037, 0.0137]
+  adapter_rate: [0.0002, 0.0489]
+  duplication_rate: [0.2702, 0.5128]
 
 # tissue-truseq
 expected_ranges:
-  survival: [0.829, 0.943]
-  host_fraction: [0.0096, 0.0365]
-  rrna_fraction: [0.0215, 0.0423]
-  adapter_rate: [0.0002, 0.0661]
-  duplication_rate: [0.4396, 0.6262]
+  survival: [0.7627, 0.9017]
+  host_fraction: [0.0061, 0.0246]
+  rrna_fraction: [0.0337, 0.0663]
+  adapter_rate: [0.0001, 0.0759]
+  duplication_rate: [0.4962, 0.6110]
 
 # metagenomics-nextera
 expected_ranges:
-  survival: [0.872, 0.991]
-  host_fraction: [0.0006, 0.0283]
-  rrna_fraction: [0.0048, 0.0339]
-  adapter_rate: [0.0002, 0.0172]
-  duplication_rate: [0.2676, 0.5239]
+  survival: [0.7156, 0.9469]
+  host_fraction: [0.0011, 0.0312]
+  rrna_fraction: [0.0147, 0.0761]
+  adapter_rate: [0.0002, 0.0166]
+  duplication_rate: [0.2925, 0.5070]
 
 # low-biomass-wga
 expected_ranges:
-  survival: [0.772, 0.977]
-  host_fraction: [0.0004, 0.0238]
-  rrna_fraction: [0.0025, 0.0362]
-  adapter_rate: [0.0018, 0.0469]
-  duplication_rate: [0.5856, 0.6382]
+  survival: [0.7897, 0.9782]
+  host_fraction: [0.0002, 0.0220]
+  rrna_fraction: [0.0028, 0.0651]
+  adapter_rate: [0.0019, 0.0458]
+  duplication_rate: [0.2949, 0.5737]
 ```
 
 ### Limitations
