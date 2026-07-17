@@ -1,5 +1,10 @@
 # Publication Plan
 
+> **ARCHIVED 2026-07-17 — do not rely on this document.** It is substantially out of date:
+> dataset counts, the ERV-classifier framing, and several claims no longer reflect the code
+> or analysis. Use primary sources instead — the current code, VALIDATION.md, and the analysis
+> outputs under benchmark_data/results/. Retained only as historical context.
+
 ## Target
 
 Single comprehensive methods paper for Genome Biology, Genome Research, or Nature Methods.

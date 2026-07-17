@@ -34,7 +34,7 @@ virome-qc addresses all of these with a single, opinionated pipeline that produc
 - **Parallel processing** via Rayon (160K+ reads/sec on Apple Silicon)
 - **Synthetic test corpus generator** with ground truth labels for benchmarking
 - **Retroviral read detection** flags reads with retroviral and HERV k-mer content (with herpesvirus k-mer exclusion to prevent false positives), reported in the passport. Endogenous-vs-exogenous discrimination is being rebuilt as an alignment-based competitive screen and is not part of the shipped pipeline.
-- **Validated on 27 datasets** (12 real public + 12 ViroForge reference + 3 ViroForge benchmarks) across 6 sequencing platforms, 5 library preps, and 5 sample types
+- **Validated on 11 real public datasets and 12 ViroForge synthetic reference datasets** across 6 sequencing platforms, 5 library preps, and 5 sample types
 - **Head-to-head with fastp**: virome-qc keeps more viral reads on clean data (+4.3%) and removes more contaminants on dirty data (-6.8%)
 
 Built on [biometal](https://github.com/shandley/biometal) for SIMD-optimized sequence operations and [SuperBloom](https://github.com/EtienneC-K/SuperBloom) for the host depletion filter.
@@ -314,7 +314,7 @@ No user configuration needed -- the ingestion engine adjusts profile parameters 
 
 ## Validation
 
-Validated on 28 datasets across 13 real public datasets (6 sequencing platforms, 5 library preps, 5 sample types) and 15 ViroForge synthetic datasets (12 reference atlas + 3 parameter sweep benchmarks). See [VALIDATION.md](VALIDATION.md) for complete results.
+Validated on 11 real public datasets (6 sequencing platforms, 5 library preps, 5 sample types; enumerated in the cross-dataset comparison) and a 12-dataset ViroForge synthetic reference atlas, plus ViroForge parameter-sweep benchmarks. See [VALIDATION.md](VALIDATION.md) for complete results. (Counts are primary from the current analysis; earlier "27/28 dataset" figures were stale.)
 
 Key findings:
 - **Zero viral false positive rate** in host depletion at 50% containment threshold (ground truth verified)
