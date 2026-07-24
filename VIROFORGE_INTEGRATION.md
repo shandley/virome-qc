@@ -155,6 +155,8 @@ The bidirectional validation story has two natural publication angles:
 
 ## Completed work (2026-03-23)
 
+> Historical snapshot. The ERV classifier referenced in the bug list below was later decommissioned (only retroviral read detection remains), and the reference-atlas ranges (line 162) were re-derived from a fresh calibration in 2026-07 (see VALIDATION.md, "Derived Expected Ranges"). The "Remaining next steps" are largely done.
+
 ### Bidirectional validation totals: 21 bugs found and fixed
 - **11 virome-qc bugs**: PhiX/Microviridae FP, truncated PhiX, adapter double-counting, adapter FP from homology, contaminant threshold, complexity clamp, internal adapter auto-enable threshold, ERV flagging disposition, MinHash empty sketches, low ERV detection, over-clustering, herpesvirus ERV cross-reactivity
 - **10 ViroForge bugs**: PhiX174 in gut collection, adapter stats mismatch, ISS no low-complexity, ISS platform models, no ERV injection, RNA template switching crash, viral fraction reporting, CLI missing flags, RNA abundance mismatch, null taxonomy, synthetic RNA contamination references

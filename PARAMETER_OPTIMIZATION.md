@@ -440,6 +440,8 @@ NovaSeq and MiSeq ISS models produced identical results.
 
 **Recommendation:** No changes needed. The streaming dedup module is validated and correct.
 
+> Update (2026-07-16): this sweep predates a paired-end correctness fix, and its "validated and correct" conclusion no longer holds in full. The streaming dedup keyed on a single mate's prefix, so two distinct paired fragments sharing one mate's start were collapsed into one; it now keys on the combined R1+R2 prefix (REVIEW_FINDINGS.md Tier 0-B). The sweep measured duplicate-detection sensitivity but did not test the paired both-mates-identical requirement that the fix restored.
+
 ---
 
 ## All sweeps complete

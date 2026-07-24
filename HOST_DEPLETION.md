@@ -170,6 +170,8 @@ The three-way classification approach handles ambiguity in the output (better) r
 
 ## Retrovirus handling: endogenous vs exogenous discrimination
 
+> Superseded (2026-07-16). The SNP-level discrimination sketched below was not shipped as described. Endogenous-vs-exogenous discrimination has been redesigned as an alignment-based competitive screen (minimap2 + DIAMOND, EVE-vs-exogenous); see EVE_DISCRIMINATION_REDESIGN.md and EVE_SCREEN_MODULE.md. The three-signal read-level classifier that did ship was later decommissioned. Kept as historical design context.
+
 ### The problem
 
 ERVs (~8% of human genome) are degraded viral fossils. Reads from ERV loci look viral but are host. However, some retroviruses (HHV-6, HTLV, HIV) can be actively infectious AND share sequence with endogenous elements. Binary classification fails here.

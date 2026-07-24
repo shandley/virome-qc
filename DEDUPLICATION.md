@@ -22,7 +22,7 @@ PCR duplicates are exact copies (same sequence AND correlated quality scores fro
 
 ### Architecture
 
-Dedup runs as a **post-pipeline step** (not a streaming QcModule) because it needs to see all reads before deciding which are duplicates. Operates on the clean output files.
+The tool ships two dedup paths. The pipeline default is **streaming dedup as a QcModule** (`StreamingDedup`), which hashes each read's prefix as reads stream through and marks later matches as duplicates. The standalone `virome-qc dedup` command uses the **post-pipeline two-pass** design below, which sees all reads on the clean output files before deciding. Both require paired-end duplicates to match on both mates (combined R1+R2 prefix, see Read signature below).
 
 ```
 Pipeline produces: clean_*.fastq.gz

@@ -138,7 +138,7 @@ pub struct HostConfig {
     /// Minimum k-mer containment fraction to classify as host (default 0.50)
     #[serde(default = "default_host_threshold")]
     pub host_threshold: f64,
-    /// Minimum k-mer containment fraction to flag as ambiguous (default 0.15)
+    /// Minimum k-mer containment fraction to flag as ambiguous (default 0.20)
     #[serde(default = "default_ambiguous_threshold")]
     pub ambiguous_threshold: f64,
     /// Use EVE-masked reference to avoid scrubbing viral sequences

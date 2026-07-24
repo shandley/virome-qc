@@ -299,4 +299,4 @@ The k=21 approach achieves near-ribodetector sensitivity (98.3%) while being fas
 - `src/pipeline/executor.rs`: Integrated between contaminant screening and host depletion
 - `src/main.rs`: `virome-qc db --rrna` command implemented
 - Tests: 4 unit tests (hash determinism, case insensitivity, containment, round-trip)
-- 114 tests total, all passing
+- 129 tests total, all passing

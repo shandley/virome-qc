@@ -838,7 +838,9 @@ Combined with our existing 4 datasets, this gives 12 datasets across 6 platforms
 
 ## Cross-Dataset Analysis (2026-03-23)
 
-Comprehensive analysis across all 11 benchmark datasets after regenerating reports with the final codebase (133 tests, 20.3K lines Rust, all modules including ERV analysis).
+Analysis across all 11 benchmark datasets, reports regenerated with all modules enabled.
+
+> Historical snapshot (2026-03-23). The Endo, Exo, Amb, and Clusters columns come from the three-signal ERV classifier, which has since been decommissioned (see section 17 and EVE_DISCRIMINATION_REDESIGN.md). The ERV Reads and ERV Frac columns (retroviral read detection) are still valid; the classification columns are kept only as a record, and any test or line counts in this section are as of that date.
 
 ### Summary Table
 
@@ -858,7 +860,7 @@ Comprehensive analysis across all 11 benchmark datasets after regenerating repor
 
 ### ERV Content Correlates with Host Background
 
-The ERV analysis module reveals a strong correlation between retroviral read content and expected host background level. This is the first quantitative demonstration that ERV fraction serves as an independent QC signal for residual host contamination in virome samples.
+Retroviral read content correlates strongly with expected host background level. This is the first quantitative demonstration that ERV fraction serves as an independent QC signal for residual host contamination in virome samples. (The correlation uses the retroviral read detection count; it does not depend on the decommissioned endo/exo classifier.)
 
 **Correlation results** (n=11 datasets):
 
@@ -947,7 +949,7 @@ fastp detects more adapters on Cook (5.76% vs 0.32%) — likely more aggressive/
 | rRNA screening (SILVA 165M k-mers) | No | Yes |
 | Host depletion (T2T-CHM13 Super Bloom) | No | Yes |
 | PhiX/vector contaminant detection | No | Yes |
-| ERV/retrovirus classification | No | Yes |
+| Retroviral read detection | No | Yes |
 | Internal adapter chimera detection | No | Yes |
 | Platform-aware poly-G detection | Partial | Yes (auto-detected) |
 | Data-driven quality thresholds | No | Yes (ingestion engine) |
@@ -1171,7 +1173,7 @@ Key insight: **dedup reveals true library quality.** Shkoporov gut VLP appeared 
 
 ### Scope
 
-fastp, BBDuk, and Trimmomatic are read preprocessing tools that perform adapter trimming, quality filtering, and (in some cases) complexity filtering. virome-qc performs these same operations plus virome-specific modules (deduplication, host depletion, rRNA screening, contaminant detection, ERV analysis). This comparison evaluates only the shared-scope operations: **adapter detection, quality trimming, poly-G/poly-X handling, complexity filtering, and N-base filtering.**
+fastp, BBDuk, and Trimmomatic are read preprocessing tools that perform adapter trimming, quality filtering, and (in some cases) complexity filtering. virome-qc performs these same operations plus virome-specific modules (deduplication, host depletion, rRNA screening, contaminant detection, retroviral read detection). This comparison evaluates only the shared-scope operations: **adapter detection, quality trimming, poly-G/poly-X handling, complexity filtering, and N-base filtering.**
 
 Three datasets chosen to represent different QC challenges:
 - **Cook mock** (ERR10359658): MiSeq 2x250, Nextera, 15-phage mock, MDA amplified. Tests adapter detection on long reads with 3' quality degradation.
@@ -1281,7 +1283,7 @@ The shared-scope comparison above covers what all tools attempt. virome-qc addit
 | Host depletion | 0.0% | 0.04% | 0.04% |
 | rRNA screening | 0.14% (3.5K) | 0.02% (2.5K) | **4.02% (804K)** |
 | Contaminant (PhiX) | 0.0% | 0.0% | 0.0% |
-| ERV analysis | 0 retroviral | 0 retroviral | 753 retroviral |
+| Retroviral read detection | 0 retroviral | 0 retroviral | 753 retroviral |
 
 On Zhang depleted stool, 804K rRNA reads (4%) pass through all three generic tools undetected. These would enter downstream assembly as false viral contigs. virome-qc identifies and removes them using the SILVA k-mer filter.
 

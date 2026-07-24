@@ -60,7 +60,7 @@ Updated 2026-03-24. Organized into tiers for paper, extended validation, and HPC
 | # | Dataset | Accession | Platform | Reads | What it tests |
 |---|---------|-----------|----------|-------|--------------|
 | 14 | Negativeome blanks | PRJEB33578 | Illumina | TBD | Extraction controls, contaminant baseline |
-| 15 | HIV+ gut virome | PRJNA1045584 (1 sample) | NextSeq 2x150 | TBD | Active retrovirus for ERV module |
+| 15 | HIV+ gut virome | PRJNA1045584 (1 sample) | NextSeq 2x150 | TBD | Active retrovirus for the EVE screen (exogenous side) |
 
 ## Tier 2: Extended Set (for HPC, +10 datasets)
 
@@ -118,7 +118,7 @@ The Tisza wastewater dataset (PRJNA966185, TWIST panel) was evaluated during ben
 | Cook ONT/PacBio | ADD | Multi-platform comparison from same mock |
 | Tisza wastewater | ADD | Best-characterized environmental virome |
 | Negativeome blanks | ADD | Essential contamination baseline |
-| HIV+ virome | ADD | Active retrovirus for ERV validation |
+| HIV+ virome | ADD | Active retrovirus for EVE screen validation |
 | 72-virus mock | ADD | Most complex synthetic community |
 
 ## Key Citations

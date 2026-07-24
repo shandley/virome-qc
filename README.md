@@ -17,7 +17,7 @@ virome-qc addresses all of these with a single, opinionated pipeline that produc
 
 ## Features
 
-- **11 QC modules** in biologically-motivated order: adapter trimming, poly-X removal, N-base filtering, quality trimming, complexity filtering, streaming deduplication, contaminant screening, rRNA screening (SILVA), host depletion, ERV analysis, length filtering
+- **11 QC modules** in biologically-motivated order: adapter trimming, poly-X removal, N-base filtering, quality trimming, complexity filtering, streaming deduplication, contaminant screening, rRNA screening (SILVA), host depletion, retroviral read detection, length filtering
 - **Internal adapter detection** using precomputed k-mer hash index with 1-mismatch tolerance
 - **Platform-aware poly-G** trimming with lower thresholds for two-color chemistry artifacts
 - **Contaminant screening** for PhiX spike-in (with Microviridae exclusion) and cloning vectors
@@ -236,7 +236,7 @@ virome-qc db --host T2T-CHM13.fa -o human.sbf
 #   reference: /path/to/human.sbf
 ```
 
-The filter uses the Super Bloom data structure (near-zero false positives via findere consistency scheme). Reads are classified by k-mer containment fraction: host (>50%, removed), ambiguous (15-50%, written to `ambiguous_*.fastq.gz`), not host (<15%, kept).
+The filter uses the Super Bloom data structure (near-zero false positives via findere consistency scheme). Reads are classified by k-mer containment fraction: host (>50%, removed), ambiguous (20-50%, written to `ambiguous_*.fastq.gz`), not host (<20%, kept).
 
 ## Test corpus generator
 
@@ -326,7 +326,7 @@ Key findings:
 
 ## Development status
 
-The tool is functional for production virome QC workflows. 133 tests, 24.8K lines Rust, clippy clean.
+The tool is functional for production virome QC workflows. 129 tests, ~27K lines Rust, clippy clean.
 
 Planned additions:
 
