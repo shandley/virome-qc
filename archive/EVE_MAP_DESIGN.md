@@ -1,5 +1,10 @@
 # T2T-CHM13 Viral Homology Map
 
+> **ARCHIVED 2026-07-17 — superseded.** This early "align all RefSeq viral vs T2T" map concept
+> was replaced by the targeted subtract-then-discriminate redesign and the alignment-based EVE
+> screen. See EVE_DISCRIMINATION_REDESIGN.md and EVE_SCREEN_MODULE.md for the current approach.
+> Retained as historical design context.
+
 ## Concept
 
 A comprehensive map of all regions in the T2T-CHM13 human reference genome that share sequence homology with known viral genomes. Built by aligning all RefSeq viral sequences against T2T-CHM13 using minimap2.
