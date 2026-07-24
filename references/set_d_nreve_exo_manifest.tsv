@@ -1,0 +1,7 @@
+label	family	organism	accession	expected_bp	fetched_bp	note
+Bornavirus_Mammalian1	Bornaviridae	Mammalian_1_orthobornavirus(BoDV,strain_BoDV-2)	NC_030692.1	8908	8908	species_refseq;no_standalone_BoDV-1_refseq
+VSBV-1	Bornaviridae	Variegated_squirrel_bornavirus_1	NC_030701.1	8798	8798	human_encephalitis
+ParvovirusB19	Parvoviridae	Human_parvovirus_B19	NC_000883.2	5596	5596	
+AAV-2	Parvoviridae	Adeno-associated_virus_2	NC_001401.2	4679	4679	
+Ebola_Zaire	Filoviridae	Zaire_ebolavirus_Mayinga	NC_002549.1	18959	18959	no_human_EVE;detection_only
+Marburg_Musoke	Filoviridae	Marburg_marburgvirus_Musoke	NC_001608.4	19112	19112	no_human_EVE;detection_only

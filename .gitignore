@@ -11,3 +11,9 @@
 .DS_Store
 report-ui/node_modules/
 benchmark_data/
+
+# Large regenerable reference artifacts (rebuild via scripts + references/protein_db_PROVENANCE.md)
+references/*.dmnd
+references/*.faa
+references/*.mmi
+references/set_b_*.fa

@@ -1,0 +1,7 @@
+label	role	organism	accession	expected_bp	fetched_bp	source
+HHV-6A_U1102	roseolovirus_ciHHV6_counterpart	Human_betaherpesvirus_6A	NC_001664.4	159378	159378	RefSeq
+HHV-6B_Z29	roseolovirus_ciHHV6_counterpart	Human_betaherpesvirus_6B	NC_000898.1	162114	162114	RefSeq
+MLV_Moloney	exogenous_gammaretrovirus_mouse	Moloney_murine_leukemia_virus	NC_001501.1	8332	8332	RefSeq
+MLV_Friend_FB29	exogenous_gammaretrovirus_mouse	Friend_murine_leukemia_virus	NC_001362.1	8323	8323	RefSeq
+MLV_typeC	exogenous_gammaretrovirus_mouse	Murine_type_C_retrovirus	NC_001702.1	8135	8135	RefSeq
+MMTV	exogenous_betaretrovirus_mouse	Mouse_mammary_tumor_virus	NC_001503.1	8805	8805	RefSeq
